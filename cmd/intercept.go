@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/AgusRdz/probe/config"
+	"github.com/AgusRdz/probe/observer"
 	"github.com/AgusRdz/probe/proxy"
 	"github.com/AgusRdz/probe/store"
 )
@@ -41,10 +42,6 @@ func RunIntercept(args []string, cfg *config.Config) {
 		fmt.Fprintln(os.Stderr, "probe intercept: --target is required")
 		fs.Usage()
 		os.Exit(1)
-	}
-
-	if *grpcReflect {
-		fmt.Fprintln(os.Stderr, "probe: gRPC reflection not yet implemented")
 	}
 
 	s, err := store.Open(*db)
@@ -89,8 +86,40 @@ func RunIntercept(args []string, cfg *config.Config) {
 		}
 	}()
 
+	if *grpcReflect {
+		go runGRPCReflect(*target, s)
+	}
+
 	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		fmt.Fprintf(os.Stderr, "probe: listen: %v\n", err)
 		os.Exit(1)
+	}
+}
+
+// runGRPCReflect calls the gRPC reflection API on the target and stores discovered
+// services as endpoints. Runs in a goroutine after the proxy starts listening.
+func runGRPCReflect(targetURL string, s *store.Store) {
+	services, err := observer.ReflectGRPCFromTarget(targetURL)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "probe: gRPC reflect: %v\n", err)
+		return
+	}
+
+	for _, svc := range services {
+		fmt.Printf("gRPC: %s (%d methods)\n", svc.ServiceName, len(svc.Methods))
+		for _, m := range svc.Methods {
+			path := "/" + svc.ServiceName + "/" + m.Name
+			_, err := s.UpsertScannedEndpoint(store.ScannedEndpointInput{
+				Method:      "POST",
+				PathPattern: path,
+				Protocol:    "grpc",
+				Framework:   "grpc",
+				ReqSchema:   m.ReqSchema,
+				RespSchema:  m.RespSchema,
+			})
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "probe: gRPC reflect store %s: %v\n", path, err)
+			}
+		}
 	}
 }
