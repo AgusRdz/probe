@@ -101,8 +101,17 @@ type ExportOptions struct {
 
 var pathParamRe = regexp.MustCompile(`\{([^}]+)\}`)
 
+// StoreReader is the read-only subset of store.Store used by export functions.
+// Both GenerateOpenAPI and GeneratePostman accept this interface so tests can
+// pass a real SQLite store without importing store directly.
+type StoreReader interface {
+	GetEndpoints() ([]store.Endpoint, error)
+	GetFieldConfidence(endpointID int64) ([]store.FieldConfidenceRow, error)
+	GetObservations(endpointID int64, limit int) ([]store.Observation, error)
+}
+
 // GenerateOpenAPI queries the store and builds an OpenAPISpec.
-func GenerateOpenAPI(s *store.Store, opts ExportOptions) (*OpenAPISpec, error) {
+func GenerateOpenAPI(s StoreReader, opts ExportOptions) (*OpenAPISpec, error) {
 	if opts.ConfidenceThreshold == 0 {
 		opts.ConfidenceThreshold = 0.9
 	}

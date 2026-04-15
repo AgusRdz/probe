@@ -31,11 +31,6 @@ func RunExport(args []string, cfg *config.Config) {
 		os.Exit(1)
 	}
 
-	if *format == "postman" {
-		fmt.Fprintln(os.Stderr, "probe export: postman format not yet implemented")
-		os.Exit(1)
-	}
-
 	s, err := store.Open(*db)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "probe: open store: %v\n", err)
@@ -52,12 +47,6 @@ func RunExport(args []string, cfg *config.Config) {
 		InfoVersion:        cfg.Export.InfoVersion,
 	}
 
-	spec, err := export.GenerateOpenAPI(s, opts)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "probe: generate openapi: %v\n", err)
-		os.Exit(1)
-	}
-
 	w := os.Stdout
 	if *out != "" {
 		f, err := os.Create(*out)
@@ -67,6 +56,25 @@ func RunExport(args []string, cfg *config.Config) {
 		}
 		defer f.Close() //nolint:errcheck
 		w = f
+	}
+
+	if *format == "postman" {
+		col, err := export.GeneratePostman(s, opts)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "probe: generate postman: %v\n", err)
+			os.Exit(1)
+		}
+		if err := export.WritePostman(w, col); err != nil {
+			fmt.Fprintf(os.Stderr, "probe: write postman: %v\n", err)
+			os.Exit(1)
+		}
+		return
+	}
+
+	spec, err := export.GenerateOpenAPI(s, opts)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "probe: generate openapi: %v\n", err)
+		os.Exit(1)
 	}
 
 	if err := export.WriteYAML(w, spec); err != nil {
