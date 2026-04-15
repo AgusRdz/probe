@@ -3,7 +3,7 @@ package export
 import (
 	"bytes"
 	"encoding/json"
-	"fmt"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -11,11 +11,11 @@ import (
 	"github.com/AgusRdz/probe/store"
 )
 
-// newTestStore opens a fresh in-memory SQLite database for each test.
+// newTestStore opens a fresh SQLite database in a temp directory for each test.
 func newTestStore(t *testing.T) *store.Store {
 	t.Helper()
-	uri := fmt.Sprintf("file:%s?mode=memory&cache=shared", t.Name())
-	s, err := store.Open(uri)
+	path := filepath.Join(t.TempDir(), "probe_test.db")
+	s, err := store.Open(path)
 	if err != nil {
 		t.Fatalf("store.Open: %v", err)
 	}

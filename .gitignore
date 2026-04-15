@@ -7,3 +7,4 @@ store/file*
 # claude
 .claude/
 memory/
+export/*.gitignore
