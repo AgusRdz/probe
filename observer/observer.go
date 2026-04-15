@@ -17,11 +17,11 @@ func Extract(pair CapturedPair) (reqSchema *Schema, respSchema *Schema) {
 	reqSchema = inferByContentType(pair.ReqContentType, pair.ReqBody)
 	respSchema = inferByContentType(pair.RespContentType, pair.RespBody)
 
-	// GraphQL override: JSON content-type + body contains "query" key → annotate.
+	// GraphQL override: JSON content-type + body contains "query" key → re-infer as GraphQL.
 	if isJSON(pair.ReqContentType) && isGraphQLBody(pair.ReqBody) {
-		if reqSchema != nil {
-			desc := "graphql"
-			reqSchema.Description = desc
+		if gqlSchema := InferGraphQLSchema(pair.ReqBody); gqlSchema != nil {
+			gqlSchema.Description = "graphql"
+			reqSchema = gqlSchema
 		}
 		if respSchema != nil {
 			respSchema.Description = "graphql"
@@ -49,7 +49,7 @@ func inferByContentType(contentType string, body []byte) *Schema {
 		return InferJSONBody(body)
 
 	case strings.Contains(ct, "application/graphql"):
-		return InferJSONBody(body)
+		return InferGraphQLSchema(body)
 
 	case ct == "application/x-www-form-urlencoded":
 		return InferFormBody(body)
@@ -58,7 +58,7 @@ func inferByContentType(contentType string, body []byte) *Schema {
 		return &Schema{Type: "object"}
 
 	case ct == "application/xml" || ct == "text/xml":
-		return &Schema{Type: "object", Description: "xml"}
+		return InferXMLBody(body)
 
 	case strings.HasPrefix(ct, "application/grpc"):
 		return &Schema{Type: "object", Description: "grpc"}
@@ -67,13 +67,6 @@ func inferByContentType(contentType string, body []byte) *Schema {
 		// Empty or unrecognized: attempt JSON parse, nil if not valid JSON.
 		return InferJSONBody(body)
 	}
-}
-
-// InferFormBody parses application/x-www-form-urlencoded bodies.
-// All values are inferred as string (form fields are always strings).
-// Stub for Phase 1.
-func InferFormBody(_ []byte) *Schema {
-	return &Schema{Type: "object"}
 }
 
 // DetectProtocol returns the protocol string ("rest", "graphql", "grpc", "xml", "form")
