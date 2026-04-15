@@ -413,6 +413,127 @@ func (s *Store) Stats() (map[string]int, error) {
 	return result, rows.Err()
 }
 
+// ScannedEndpointInput carries the fields from a static-analysis scan result.
+// Using a dedicated input type avoids a circular import between store and scanner.
+type ScannedEndpointInput struct {
+	Method      string
+	PathPattern string
+	Protocol    string
+	Framework   string
+	SourceFile  string
+	SourceLine  int
+	ReqSchema   *observer.Schema
+	RespSchema  *observer.Schema
+	StatusCodes []int
+	Description string
+	Tags        []string
+	Deprecated  bool
+}
+
+// UpsertScannedEndpoint stores a ScannedEndpoint discovered by probe scan.
+// If the endpoint already exists as "observed", upgrades source to "scan+obs".
+// Stores req/resp schema from scan as initial field_confidence skeleton rows
+// (seen_count=0, total_calls=0) that traffic observation will later increment.
+// Returns true if the endpoint row was newly inserted, false if it already existed.
+func (s *Store) UpsertScannedEndpoint(input ScannedEndpointInput) (bool, error) {
+	now := time.Now().UTC().Format(time.RFC3339)
+
+	res, err := s.db.Exec(`
+		INSERT OR IGNORE INTO endpoints
+			(method, path_pattern, protocol, source, first_seen, last_seen)
+		VALUES (?, ?, ?, 'scan', ?, ?)`,
+		input.Method, input.PathPattern, input.Protocol, now, now,
+	)
+	if err != nil {
+		return false, fmt.Errorf("store: upsert scanned endpoint insert: %w", err)
+	}
+
+	rowsAffected, err := res.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("store: upsert scanned endpoint rows affected: %w", err)
+	}
+	isNew := rowsAffected > 0
+
+	deprecated := 0
+	if input.Deprecated {
+		deprecated = 1
+	}
+
+	tagsJSON, err := json.Marshal(input.Tags)
+	if err != nil {
+		return false, fmt.Errorf("store: marshal tags: %w", err)
+	}
+
+	_, err = s.db.Exec(`
+		UPDATE endpoints
+		SET source      = CASE
+		                     WHEN source = 'observed' THEN 'scan+obs'
+		                     ELSE source
+		                  END,
+		    framework   = ?,
+		    source_file = ?,
+		    source_line = ?,
+		    description = ?,
+		    deprecated  = ?,
+		    tags_json   = ?,
+		    last_seen   = ?
+		WHERE method = ? AND path_pattern = ?`,
+		input.Framework, input.SourceFile, input.SourceLine,
+		input.Description, deprecated, string(tagsJSON), now,
+		input.Method, input.PathPattern,
+	)
+	if err != nil {
+		return false, fmt.Errorf("store: upsert scanned endpoint update: %w", err)
+	}
+
+	var endpointID int64
+	err = s.db.QueryRow(
+		`SELECT id FROM endpoints WHERE method = ? AND path_pattern = ?`,
+		input.Method, input.PathPattern,
+	).Scan(&endpointID)
+	if err != nil {
+		return false, fmt.Errorf("store: upsert scanned endpoint select id: %w", err)
+	}
+
+	// Insert skeleton field_confidence rows (seen_count=0, total_calls=0).
+	if err := insertSkeletonFieldsTx(s.db, endpointID, "request", input.ReqSchema); err != nil {
+		return false, err
+	}
+	if err := insertSkeletonFieldsTx(s.db, endpointID, "response", input.RespSchema); err != nil {
+		return false, err
+	}
+
+	return isNew, nil
+}
+
+// insertSkeletonFieldsTx inserts field_confidence rows for every leaf in schema
+// with seen_count=0 and total_calls=0. Uses INSERT OR IGNORE so existing rows
+// (already populated by traffic observation) are not overwritten.
+func insertSkeletonFieldsTx(db *sql.DB, endpointID int64, location string, schema *observer.Schema) error {
+	if schema == nil {
+		return nil
+	}
+
+	fields := map[string]*observer.Schema{}
+	flattenSchema(schema, "", fields)
+
+	for fieldPath, fieldSchema := range fields {
+		typeJSON, err := json.Marshal(fieldSchema)
+		if err != nil {
+			return fmt.Errorf("store: marshal skeleton field schema %q: %w", fieldPath, err)
+		}
+		if _, err := db.Exec(`
+			INSERT OR IGNORE INTO field_confidence
+				(endpoint_id, location, field_path, seen_count, total_calls, type_json)
+			VALUES (?, ?, ?, 0, 0, ?)`,
+			endpointID, location, fieldPath, string(typeJSON),
+		); err != nil {
+			return fmt.Errorf("store: insert skeleton field_confidence %q: %w", fieldPath, err)
+		}
+	}
+	return nil
+}
+
 // --- private helpers ---
 
 func applyPragmas(db *sql.DB) error {

@@ -40,8 +40,7 @@ func main() {
 	case "clear":
 		cmd.RunClear(os.Args[2:], cfg)
 	case "scan":
-		fmt.Fprintln(os.Stderr, "probe scan: coming in Phase 2")
-		os.Exit(1)
+		cmd.RunScan(os.Args[2:], cfg)
 	case "version", "--version", "-v":
 		cmd.RunVersion(os.Args[2:])
 	case "help", "--help", "-h":
@@ -151,6 +150,8 @@ func printCommandHelp(command string) {
 		cmd.RunStats([]string{"--help"}, &config.Config{})
 	case "clear":
 		cmd.RunClear([]string{"--help"}, &config.Config{})
+	case "scan":
+		cmd.RunScan([]string{"--help"}, &config.Config{})
 	default:
 		fmt.Fprintf(os.Stderr, "probe: unknown command %q\n\nRun 'probe help' for usage.\n", command)
 		os.Exit(1)
