@@ -1,0 +1,244 @@
+package store
+
+import (
+	"fmt"
+	"testing"
+
+	"github.com/AgusRdz/probe/observer"
+)
+
+// newTestStore opens a fresh in-memory SQLite database for each test.
+// Using a unique URI per test ensures no shared state between parallel tests.
+func newTestStore(t *testing.T) *Store {
+	t.Helper()
+	// Each test gets its own named in-memory cache so they don't share state.
+	uri := fmt.Sprintf("file:%s?mode=memory&cache=shared", t.Name())
+	s, err := Open(uri)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	t.Cleanup(func() { s.Close() })
+	return s
+}
+
+func TestOpen(t *testing.T) {
+	t.Parallel()
+	s := newTestStore(t)
+	if s.db == nil {
+		t.Fatal("expected non-nil db")
+	}
+	if err := s.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	// Mark already-closed so cleanup doesn't double-close.
+	s.db = nil
+}
+
+func TestUpsertEndpointIdempotent(t *testing.T) {
+	t.Parallel()
+	s := newTestStore(t)
+
+	id1, err := s.UpsertEndpoint("GET", "/api/users", "rest", "observed")
+	if err != nil {
+		t.Fatalf("first upsert: %v", err)
+	}
+
+	id2, err := s.UpsertEndpoint("GET", "/api/users", "rest", "observed")
+	if err != nil {
+		t.Fatalf("second upsert: %v", err)
+	}
+
+	if id1 != id2 {
+		t.Errorf("expected same ID on duplicate upsert; got %d and %d", id1, id2)
+	}
+}
+
+func TestRecord(t *testing.T) {
+	t.Parallel()
+	s := newTestStore(t)
+
+	pair := observer.CapturedPair{
+		Method:          "POST",
+		RawPath:         "/api/items",
+		ReqContentType:  "application/json",
+		RespContentType: "application/json",
+		StatusCode:      201,
+		LatencyMs:       12,
+	}
+
+	reqSchema := &observer.Schema{
+		Type: "object",
+		Properties: map[string]*observer.Schema{
+			"name": {Type: "string"},
+		},
+	}
+	respSchema := &observer.Schema{
+		Type: "object",
+		Properties: map[string]*observer.Schema{
+			"id":   {Type: "integer"},
+			"name": {Type: "string"},
+		},
+	}
+
+	if err := s.Record(pair, reqSchema, respSchema); err != nil {
+		t.Fatalf("Record: %v", err)
+	}
+
+	endpoints, err := s.GetEndpoints()
+	if err != nil {
+		t.Fatalf("GetEndpoints: %v", err)
+	}
+	if len(endpoints) != 1 {
+		t.Fatalf("expected 1 endpoint; got %d", len(endpoints))
+	}
+	if endpoints[0].CallCount != 1 {
+		t.Errorf("expected call_count=1; got %d", endpoints[0].CallCount)
+	}
+	if endpoints[0].Method != "POST" {
+		t.Errorf("expected method=POST; got %q", endpoints[0].Method)
+	}
+}
+
+func TestFieldConfidenceTracking(t *testing.T) {
+	t.Parallel()
+	s := newTestStore(t)
+
+	pair := observer.CapturedPair{
+		Method:     "GET",
+		RawPath:    "/api/users",
+		StatusCode: 200,
+	}
+
+	// Schema WITH "email" field.
+	withEmail := &observer.Schema{
+		Type: "object",
+		Properties: map[string]*observer.Schema{
+			"id":    {Type: "integer"},
+			"email": {Type: "string", Format: "email"},
+		},
+	}
+	// Schema WITHOUT "email" field.
+	withoutEmail := &observer.Schema{
+		Type: "object",
+		Properties: map[string]*observer.Schema{
+			"id": {Type: "integer"},
+		},
+	}
+
+	// Call 1: with email.
+	if err := s.Record(pair, nil, withEmail); err != nil {
+		t.Fatalf("Record call 1: %v", err)
+	}
+	// Call 2: without email.
+	if err := s.Record(pair, nil, withoutEmail); err != nil {
+		t.Fatalf("Record call 2: %v", err)
+	}
+	// Call 3: with email.
+	if err := s.Record(pair, nil, withEmail); err != nil {
+		t.Fatalf("Record call 3: %v", err)
+	}
+
+	endpoints, err := s.GetEndpoints()
+	if err != nil {
+		t.Fatalf("GetEndpoints: %v", err)
+	}
+	if len(endpoints) == 0 {
+		t.Fatal("no endpoints")
+	}
+
+	rows, err := s.GetFieldConfidence(endpoints[0].ID)
+	if err != nil {
+		t.Fatalf("GetFieldConfidence: %v", err)
+	}
+
+	confidence := map[string]struct{ seen, total int }{}
+	for _, r := range rows {
+		if r.Location == "response" {
+			confidence[r.FieldPath] = struct{ seen, total int }{r.SeenCount, r.TotalCalls}
+		}
+	}
+
+	emailConf, ok := confidence["email"]
+	if !ok {
+		t.Fatal("expected field_confidence row for 'email'")
+	}
+	if emailConf.seen != 2 {
+		t.Errorf("email seen_count: want 2, got %d", emailConf.seen)
+	}
+	if emailConf.total != 3 {
+		t.Errorf("email total_calls: want 3, got %d", emailConf.total)
+	}
+
+	idConf, ok := confidence["id"]
+	if !ok {
+		t.Fatal("expected field_confidence row for 'id'")
+	}
+	if idConf.seen != 3 {
+		t.Errorf("id seen_count: want 3, got %d", idConf.seen)
+	}
+	if idConf.total != 3 {
+		t.Errorf("id total_calls: want 3, got %d", idConf.total)
+	}
+}
+
+func TestDeleteEndpoint(t *testing.T) {
+	t.Parallel()
+	s := newTestStore(t)
+
+	pair := observer.CapturedPair{
+		Method:     "DELETE",
+		RawPath:    "/api/things/1",
+		StatusCode: 204,
+	}
+	if err := s.Record(pair, nil, nil); err != nil {
+		t.Fatalf("Record: %v", err)
+	}
+
+	endpoints, err := s.GetEndpoints()
+	if err != nil {
+		t.Fatalf("GetEndpoints: %v", err)
+	}
+	if len(endpoints) != 1 {
+		t.Fatalf("expected 1 endpoint before delete; got %d", len(endpoints))
+	}
+
+	if err := s.DeleteEndpoint(endpoints[0].ID); err != nil {
+		t.Fatalf("DeleteEndpoint: %v", err)
+	}
+
+	endpoints, err = s.GetEndpoints()
+	if err != nil {
+		t.Fatalf("GetEndpoints after delete: %v", err)
+	}
+	if len(endpoints) != 0 {
+		t.Errorf("expected 0 endpoints after delete; got %d", len(endpoints))
+	}
+}
+
+func TestStats(t *testing.T) {
+	t.Parallel()
+	s := newTestStore(t)
+
+	// Two distinct endpoints, both observed.
+	pairs := []observer.CapturedPair{
+		{Method: "GET", RawPath: "/api/a", StatusCode: 200},
+		{Method: "POST", RawPath: "/api/b", StatusCode: 201},
+	}
+	for _, p := range pairs {
+		if err := s.Record(p, nil, nil); err != nil {
+			t.Fatalf("Record %s %s: %v", p.Method, p.RawPath, err)
+		}
+	}
+
+	stats, err := s.Stats()
+	if err != nil {
+		t.Fatalf("Stats: %v", err)
+	}
+
+	if got := stats["total"]; got != 2 {
+		t.Errorf("total = %d; want 2", got)
+	}
+	if got := stats["observed"]; got != 2 {
+		t.Errorf("observed = %d; want 2", got)
+	}
+}
