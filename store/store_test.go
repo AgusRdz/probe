@@ -1,19 +1,18 @@
 package store
 
 import (
-	"fmt"
+	"path/filepath"
 	"testing"
 
 	"github.com/AgusRdz/probe/observer"
 )
 
-// newTestStore opens a fresh in-memory SQLite database for each test.
-// Using a unique URI per test ensures no shared state between parallel tests.
+// newTestStore opens a fresh SQLite database in a temp directory for each test.
+// t.TempDir() is cleaned up automatically; no ghost files left in the repo.
 func newTestStore(t *testing.T) *Store {
 	t.Helper()
-	// Each test gets its own named in-memory cache so they don't share state.
-	uri := fmt.Sprintf("file:%s?mode=memory&cache=shared", t.Name())
-	s, err := Open(uri)
+	path := filepath.Join(t.TempDir(), "probe_test.db")
+	s, err := Open(path)
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}

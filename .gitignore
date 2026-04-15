@@ -2,6 +2,7 @@
 dist/
 bin/
 *.db
+store/file*
 
 # claude
 .claude/
