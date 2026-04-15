@@ -2,9 +2,9 @@
 dist/
 bin/
 *.db
-store/file*
+# SQLite ghost files from modernc.org/sqlite URI tests run inside Docker volumes
+**/file*mode=memory*
 
 # claude
 .claude/
 memory/
-export/*.gitignore
