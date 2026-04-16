@@ -2,6 +2,7 @@
 dist/
 bin/
 *.db
+signing.pem
 # SQLite ghost files from modernc.org/sqlite URI tests run inside Docker volumes
 **/file*mode=memory*
 

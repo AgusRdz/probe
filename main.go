@@ -41,6 +41,8 @@ func main() {
 		cmd.RunClear(os.Args[2:], cfg)
 	case "scan":
 		cmd.RunScan(os.Args[2:], cfg)
+	case "update":
+		cmd.RunUpdate(os.Args[2:])
 	case "version", "--version", "-v":
 		cmd.RunVersion(os.Args[2:])
 	case "help", "--help", "-h":
@@ -114,6 +116,7 @@ func printHelp() {
 	b.WriteString("\n")
 
 	b.WriteString(section("Other"))
+	b.WriteString(row("update", "Download and install the latest release"))
 	b.WriteString(row("version", "Show version"))
 	b.WriteString(row("help [command]", "Show this help or command help"))
 	b.WriteString("\n")

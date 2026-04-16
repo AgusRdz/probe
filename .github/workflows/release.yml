@@ -1,0 +1,64 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build, sign, and release
+    runs-on: ubuntu-latest
+
+    strategy:
+      matrix:
+        include:
+          - goos: linux
+            goarch: amd64
+          - goos: linux
+            goarch: arm64
+          - goos: darwin
+            goarch: amd64
+          - goos: darwin
+            goarch: arm64
+          - goos: windows
+            goarch: amd64
+            ext: .exe
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Set up Go
+        uses: actions/setup-go@d35c59abb061a4a6fb18e82ac0862c26744d6ab5 # v5.5.0
+        with:
+          go-version-file: go.mod
+
+      - name: Build
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: 0
+        run: |
+          BINARY="dist/probe-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.ext }}"
+          mkdir -p dist
+          go build -ldflags="-X main.version=${{ github.ref_name }}" -o "$BINARY" .
+
+      - name: Sign
+        env:
+          PROBE_SIGNING_KEY: ${{ secrets.PROBE_SIGNING_KEY }}
+        run: |
+          echo "$PROBE_SIGNING_KEY" | base64 -d > signing.pem
+          BINARY="dist/probe-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.ext }}"
+          sh scripts/sign.sh "$BINARY"
+          rm -f signing.pem
+
+      - name: Upload release assets
+        uses: softprops/action-gh-release@da05d552573ad5aba039eaac05058a918a7bf631 # v2.2.2
+        with:
+          files: |
+            dist/probe-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.ext }}
+            dist/probe-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.ext }}.sig
