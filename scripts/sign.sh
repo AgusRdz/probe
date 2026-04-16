@@ -26,5 +26,6 @@ if [ ! -f signing.pem ]; then
   exit 1
 fi
 
-openssl pkeyutl -sign -inkey signing.pem -in "$BINARY" | base64 > "${BINARY}.sig"
+openssl pkeyutl -sign -rawin -inkey signing.pem -in "$BINARY" | base64 > "${BINARY}.sig"
+[ -s "${BINARY}.sig" ] || { echo "sign.sh: ERROR: ${BINARY}.sig is empty — signing failed" >&2; exit 1; }
 echo "Signed: ${BINARY}.sig"

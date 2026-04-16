@@ -1,4 +1,5 @@
 name: Release
+run-name: Release ${{ github.ref_name }}
 
 on:
   push:
@@ -8,25 +9,13 @@ on:
 permissions:
   contents: write
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
 jobs:
   release:
     name: Build, sign, and release
     runs-on: ubuntu-latest
-
-    strategy:
-      matrix:
-        include:
-          - goos: linux
-            goarch: amd64
-          - goos: linux
-            goarch: arm64
-          - goos: darwin
-            goarch: amd64
-          - goos: darwin
-            goarch: arm64
-          - goos: windows
-            goarch: amd64
-            ext: .exe
 
     steps:
       - name: Checkout
@@ -37,28 +26,52 @@ jobs:
         with:
           go-version-file: go.mod
 
-      - name: Build
-        env:
-          GOOS: ${{ matrix.goos }}
-          GOARCH: ${{ matrix.goarch }}
-          CGO_ENABLED: 0
+      - name: Validate semver tag
         run: |
-          BINARY="dist/probe-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.ext }}"
-          mkdir -p dist
-          go build -ldflags="-X main.version=${{ github.ref_name }}" -o "$BINARY" .
+          if ! echo "${{ github.ref_name }}" | grep -qE '^v[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "ERROR: tag '${{ github.ref_name }}' is not valid semver"
+            exit 1
+          fi
 
-      - name: Sign
+      - name: Run tests
+        run: go test ./... -count=1
+
+      - name: Build binaries
+        run: |
+          VERSION=${{ github.ref_name }}
+          LDFLAGS="-s -w -X main.version=${VERSION}"
+          mkdir -p dist
+          CGO_ENABLED=0 GOOS=linux   GOARCH=amd64 go build -ldflags="${LDFLAGS}" -o dist/probe-linux-amd64 .
+          CGO_ENABLED=0 GOOS=linux   GOARCH=arm64 go build -ldflags="${LDFLAGS}" -o dist/probe-linux-arm64 .
+          CGO_ENABLED=0 GOOS=darwin  GOARCH=amd64 go build -ldflags="${LDFLAGS}" -o dist/probe-darwin-amd64 .
+          CGO_ENABLED=0 GOOS=darwin  GOARCH=arm64 go build -ldflags="${LDFLAGS}" -o dist/probe-darwin-arm64 .
+          CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -ldflags="${LDFLAGS}" -o dist/probe-windows-amd64.exe .
+
+      - name: Sign binaries
         env:
           PROBE_SIGNING_KEY: ${{ secrets.PROBE_SIGNING_KEY }}
         run: |
-          echo "$PROBE_SIGNING_KEY" | base64 -d > signing.pem
-          BINARY="dist/probe-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.ext }}"
-          sh scripts/sign.sh "$BINARY"
-          rm -f signing.pem
+          set -euo pipefail
+          echo "$PROBE_SIGNING_KEY" | base64 -d > /tmp/signing.pem
+          openssl pkey -in /tmp/signing.pem -noout
+          for f in dist/probe-*; do
+            openssl pkeyutl -sign -rawin -inkey /tmp/signing.pem -in "$f" | base64 > "${f}.sig"
+            [ -s "${f}.sig" ] || { echo "ERROR: ${f}.sig is empty — signing failed"; exit 1; }
+            echo "Signed: ${f}.sig"
+          done
+          rm /tmp/signing.pem
 
       - name: Upload release assets
         uses: softprops/action-gh-release@da05d552573ad5aba039eaac05058a918a7bf631 # v2.2.2
         with:
           files: |
-            dist/probe-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.ext }}
-            dist/probe-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.ext }}.sig
+            dist/probe-linux-amd64
+            dist/probe-linux-amd64.sig
+            dist/probe-linux-arm64
+            dist/probe-linux-arm64.sig
+            dist/probe-darwin-amd64
+            dist/probe-darwin-amd64.sig
+            dist/probe-darwin-arm64
+            dist/probe-darwin-arm64.sig
+            dist/probe-windows-amd64.exe
+            dist/probe-windows-amd64.exe.sig
