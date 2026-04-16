@@ -44,7 +44,17 @@ func RunIntercept(args []string, cfg *config.Config) {
 		os.Exit(1)
 	}
 
-	s, err := store.Open(*db)
+	dbPath := *db
+	if dbPath == "" {
+		var err error
+		dbPath, err = store.DBPathForTarget(*target)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "probe: resolve db path: %v\n", err)
+			os.Exit(1)
+		}
+	}
+
+	s, err := store.Open(dbPath)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "probe: open store: %v\n", err)
 		os.Exit(1)
@@ -58,7 +68,7 @@ func RunIntercept(args []string, cfg *config.Config) {
 	}
 
 	addr := fmt.Sprintf("%s:%d", *bind, *port)
-	fmt.Printf("probe: intercepting → %s  listening on %s\n", *target, addr)
+	fmt.Printf("probe: intercepting → %s  listening on %s  db: %s\n", *target, addr, dbPath)
 
 	srv := &http.Server{
 		Addr:    addr,

@@ -552,19 +552,57 @@ func applyPragmas(db *sql.DB) error {
 }
 
 func defaultDBPath() (string, error) {
+	return dbPathForName("probe")
+}
+
+// DBPathForTarget returns the DB path derived from the target URL's hostname,
+// e.g. https://resident-api.local.ciranet.com:443 → .../resident-api.local.ciranet.com.db
+// Falls back to the default probe.db if the URL cannot be parsed.
+func DBPathForTarget(target string) (string, error) {
+	name := hostnameFromURL(target)
+	if name == "" {
+		return defaultDBPath()
+	}
+	return dbPathForName(name)
+}
+
+func hostnameFromURL(raw string) string {
+	// Minimal parse — avoid importing net/url just for this.
+	s := raw
+	if i := strings.Index(s, "://"); i >= 0 {
+		s = s[i+3:]
+	}
+	if i := strings.IndexByte(s, '/'); i >= 0 {
+		s = s[:i]
+	}
+	// Strip port.
+	if i := strings.LastIndexByte(s, ':'); i >= 0 {
+		s = s[:i]
+	}
+	// Sanitise: keep only hostname-safe chars.
+	var b strings.Builder
+	for _, c := range s {
+		if (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '-' || c == '.' {
+			b.WriteRune(c)
+		}
+	}
+	return strings.ToLower(b.String())
+}
+
+func dbPathForName(name string) (string, error) {
 	var base string
 	if runtime.GOOS == "windows" {
 		base = os.Getenv("LOCALAPPDATA")
 		if base == "" {
 			return "", fmt.Errorf("%%LOCALAPPDATA%% is not set")
 		}
-		return filepath.Join(base, "probe", "probe.db"), nil
+		return filepath.Join(base, "probe", name+".db"), nil
 	}
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(home, ".local", "share", "probe", "probe.db"), nil
+	return filepath.Join(home, ".local", "share", "probe", name+".db"), nil
 }
 
 // upsertEndpointTx is the transactional variant of UpsertEndpoint.

@@ -90,6 +90,84 @@ public class UsersController : ControllerBase
 	}
 }
 
+// TestASPNetMVCFrameworkPatterns covers .NET Framework 4.x patterns:
+//   - [RoutePrefix] on class instead of [Route]
+//   - IHttpActionResult return type instead of IActionResult
+//   - Flexible attribute order ([Route] before or after [HttpMethod])
+func TestASPNetMVCFrameworkPatterns(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "App.csproj"), []byte("<Project/>"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	src := `using System.Web.Http;
+
+namespace CiraNet.Attorney.Api.Controllers;
+
+[Authorize]
+[RoutePrefix("api/account")]
+public class AccountController : APBaseApiController
+{
+    /// <summary>Get account notes</summary>
+    [HttpGet]
+    [Route("notes")]
+    public async Task<IHttpActionResult> GetReferredAccountNotes()
+    {
+        return Ok();
+    }
+
+    [HttpPost]
+    [Route("statement")]
+    public async Task<IHttpActionResult> PostGenerateStatement([FromBody] StatementRequest request)
+    {
+        return Ok();
+    }
+
+    [AllowAnonymous]
+    [Route("resetpassword")]
+    [HttpPut]
+    public async Task<IHttpActionResult> ResetPassword([FromBody] ResetPasswordRequest request)
+    {
+        return Ok();
+    }
+
+    [HttpGet]
+    [Route("{id}")]
+    public async Task<IHttpActionResult> GetById(int id)
+    {
+        return Ok();
+    }
+}
+`
+	if err := os.WriteFile(filepath.Join(dir, "AccountController.cs"), []byte(src), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	ex := &aspnetMVCExtractor{}
+	endpoints, err := ex.Extract(dir, &config.ScanConfig{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	found := map[string]bool{}
+	for _, ep := range endpoints {
+		found[ep.Method+":"+ep.PathPattern] = true
+	}
+
+	wants := []string{
+		"GET:api/account/notes",
+		"POST:api/account/statement",
+		"PUT:api/account/resetpassword",
+		"GET:api/account/{id}",
+	}
+	for _, want := range wants {
+		if !found[want] {
+			t.Logf("all endpoints: %v", found)
+			t.Errorf("missing endpoint %s", want)
+		}
+	}
+}
+
 func TestASPNetMVCCSTypeToSchema(t *testing.T) {
 	tests := []struct {
 		csType string

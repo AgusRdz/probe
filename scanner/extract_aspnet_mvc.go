@@ -25,16 +25,19 @@ func (e *aspnetMVCExtractor) Detect(dir string) bool {
 // [Route("api/[controller]")] attribute on class
 var reCSRouteAttr = regexp.MustCompile(`\[Route\s*\(\s*"([^"]+)"\s*\)\]`)
 
+// [RoutePrefix("api/account")] — .NET Framework Web API class-level prefix
+var reCSRoutePrefixAttr = regexp.MustCompile(`\[RoutePrefix\s*\(\s*"([^"]+)"\s*\)\]`)
+
 // [HttpGet], [HttpPost], [HttpPut], [HttpPatch], [HttpDelete] on method
 var reCSHttpMethod = regexp.MustCompile(`\[Http(Get|Post|Put|Patch|Delete|Head|Options)(?:\s*\(\s*"([^"]*)"\s*\))?\]`)
 
 // class UsersController : ...
 var reCSController = regexp.MustCompile(`(?:public\s+)?(?:abstract\s+)?class\s+(\w+Controller)\s*(?::|$)`)
 
-// public ActionResult / IActionResult / Task<> method signature
-// Handles simple generics (ActionResult<User>) and nested generics (ActionResult<IEnumerable<User>>).
+// public ActionResult / IActionResult / IHttpActionResult / Task<> method signature
+// Handles .NET Core (IActionResult, ActionResult<T>) and .NET Framework (IHttpActionResult, HttpResponseMessage).
 // Group 1: inner type from \w+Result<T>; Group 2: inner type from ActionResult<T> (may be complex); Group 3: method name.
-var reCSActionMethod = regexp.MustCompile(`(?i)public\s+(?:async\s+)?(?:Task<)?(?:\w+Result(?:<(\w+)>)?|IActionResult|ActionResult(?:<(\w+(?:<[^>]+>)?)>)?)\s+(\w+)\s*\(`)
+var reCSActionMethod = regexp.MustCompile(`(?i)public\s+(?:async\s+)?(?:Task<)?(?:\w+Result(?:<(\w+)>)?|IActionResult|IHttpActionResult|HttpResponseMessage|ActionResult(?:<(\w+(?:<[^>]+>)?)>)?)>?\s+(\w+)\s*\(`)
 
 // [FromBody] TypeName paramName
 var reCSFromBody = regexp.MustCompile(`\[FromBody\]\s+(\w+)\s+\w+`)
@@ -119,12 +122,20 @@ func extractASPNetMVCFile(path string, schemas map[string]*observer.Schema) ([]S
 			break
 		}
 	}
-	for _, line := range lines {
-		if m := reCSRouteAttr.FindStringSubmatch(line); m != nil {
-			raw := m[1]
+	classPrefixLine := -1
+	for idx, line := range lines {
+		// Check both [Route("...")] and [RoutePrefix("...")] for class-level prefix.
+		raw := ""
+		if m := reCSRoutePrefixAttr.FindStringSubmatch(line); m != nil {
+			raw = m[1]
+		} else if m := reCSRouteAttr.FindStringSubmatch(line); m != nil {
+			raw = m[1]
+		}
+		if raw != "" {
 			raw = strings.Replace(raw, "[controller]",
 				strings.TrimPrefix(controllerBasePath, "/"), 1)
 			classPrefix = "/" + strings.TrimLeft(raw, "/")
+			classPrefixLine = idx
 			break
 		}
 	}
@@ -135,7 +146,8 @@ func extractASPNetMVCFile(path string, schemas map[string]*observer.Schema) ([]S
 
 	var endpoints []ScannedEndpoint
 	var pendingMethod string
-	var pendingMethodPath string
+	var pendingMethodPath string  // from [HttpMethod("path")]
+	var pendingRoutePath string   // from method-level [Route("path")]
 	var pendingDeprecated bool
 	var pendingDescription string
 
@@ -161,6 +173,13 @@ func extractASPNetMVCFile(path string, schemas map[string]*observer.Schema) ([]S
 			continue
 		}
 
+		// Method-level [Route("path")] — skip the line that already set the class prefix.
+		// Handles both orders: [HttpGet] then [Route], or [Route] then [HttpGet].
+		if m := reCSRouteAttr.FindStringSubmatch(trimmed); m != nil && i != classPrefixLine {
+			pendingRoutePath = m[1]
+			continue
+		}
+
 		// Action method signature.
 		if pendingMethod != "" {
 			if m := reCSActionMethod.FindStringSubmatch(trimmed); m != nil {
@@ -169,7 +188,11 @@ func extractASPNetMVCFile(path string, schemas map[string]*observer.Schema) ([]S
 					responseType = m[2]
 				}
 
+				// Use explicit method path, fall back to method-level [Route], then empty.
 				methodPath := pendingMethodPath
+				if methodPath == "" {
+					methodPath = pendingRoutePath
+				}
 				fullPath := NormalizeFrameworkPath(classPrefix + "/" + strings.TrimLeft(methodPath, "/"))
 				// Collapse double slashes.
 				for strings.Contains(fullPath, "//") {
@@ -213,6 +236,7 @@ func extractASPNetMVCFile(path string, schemas map[string]*observer.Schema) ([]S
 				endpoints = append(endpoints, ep)
 				pendingMethod = ""
 				pendingMethodPath = ""
+				pendingRoutePath = ""
 				pendingDeprecated = false
 				pendingDescription = ""
 			}

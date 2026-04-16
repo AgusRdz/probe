@@ -35,7 +35,7 @@ irm https://raw.githubusercontent.com/AgusRdz/probe/main/install.ps1 | iex
 ## Usage
 
 ```sh
-# Start capturing traffic
+# Start capturing traffic — each target gets its own DB automatically
 probe intercept --target http://localhost:3000
 
 # List discovered endpoints
@@ -109,7 +109,9 @@ inference:
 | Java | Spring MVC |
 | Kotlin | Ktor |
 | Rust | Actix-web, Axum |
-| C# | ASP.NET MVC, ASP.NET Minimal API |
+| C# | ASP.NET Core MVC, ASP.NET Minimal API, ASP.NET Web API (.NET Framework 4.x) |
+
+Supports both .NET Core (`[Route]`, `IActionResult`) and .NET Framework (`[RoutePrefix]`, `IHttpActionResult`) attribute routing styles, including flexible decorator ordering.
 
 ---
 
