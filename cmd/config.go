@@ -11,7 +11,7 @@ import (
 )
 
 // RunConfig runs `probe config [show|edit [global|project]]`.
-func RunConfig(args []string) {
+func RunConfig(args []string, cfg *config.Config) {
 	sub := "show"
 	if len(args) > 0 {
 		sub = args[0]
@@ -19,20 +19,20 @@ func RunConfig(args []string) {
 
 	switch sub {
 	case "show":
-		configShow()
+		configShow(cfg)
 	case "edit":
 		target := "project"
 		if len(args) > 1 {
 			target = args[1]
 		}
-		configEdit(target)
+		configEdit(target, cfg)
 	default:
 		fmt.Fprintf(os.Stderr, "probe config: unknown subcommand %q\n\nusage: probe config [show|edit [global|project]]\n", sub)
 		os.Exit(1)
 	}
 }
 
-func configShow() {
+func configShow(cfg *config.Config) {
 	globalPath := config.Path()
 	projectPath := config.ProjectPath()
 
@@ -52,13 +52,15 @@ func configShow() {
 	fmt.Println()
 
 	fmt.Println()
+	editor := resolveEditor(cfg)
+	fmt.Printf("Editor: %s\n", editor)
+	if cfg.Output.Editor == "" {
+		fmt.Println("  (set output.editor in global config or $PROBE_EDITOR to override)")
+	}
+	fmt.Println()
 	fmt.Println("To edit:")
 	fmt.Println("  probe config edit          # project (.probe.yml in cwd)")
 	fmt.Println("  probe config edit global   # global (~/.config/probe/config.yml)")
-	fmt.Println()
-	fmt.Println("To set a preferred editor:")
-	fmt.Println("  export EDITOR=code         # VS Code")
-	fmt.Println("  export EDITOR=vim")
 }
 
 // configTemplate is written to a new config file so the user has a reference.
@@ -93,13 +95,15 @@ const configTemplate = `# probe configuration
 
 # output:
 #   no_color: false
+#   editor: code       # editor for 'probe config edit' (e.g. code, vim, nano, notepad++)
+#                      # also settable via $PROBE_EDITOR env var
 
 # path_overrides:
 #   - pattern: "/api/v*/users/me"
 #     keep_as: "/api/v{version}/users/me"
 `
 
-func configEdit(target string) {
+func configEdit(target string, cfg *config.Config) {
 	var path string
 	switch target {
 	case "global":
@@ -124,7 +128,7 @@ func configEdit(target string) {
 		fmt.Printf("Created %s\n", path)
 	}
 
-	editor := resolveEditor()
+	editor := resolveEditor(cfg)
 	fmt.Printf("Opening %s with %s\n", path, editor)
 
 	cmd := exec.Command(editor, path)
@@ -141,18 +145,19 @@ func configEdit(target string) {
 	}
 }
 
-// resolveEditor returns the editor to use: $EDITOR → $VISUAL → platform default.
-func resolveEditor() string {
-	if e := os.Getenv("EDITOR"); e != "" {
+// resolveEditor returns the editor to use:
+// $PROBE_EDITOR → output.editor in config → platform default (notepad / nano / vi).
+// Intentionally ignores $EDITOR and $VISUAL — those belong to the user's shell, not probe.
+func resolveEditor(cfg *config.Config) string {
+	if e := os.Getenv("PROBE_EDITOR"); e != "" {
 		return e
 	}
-	if e := os.Getenv("VISUAL"); e != "" {
-		return e
+	if cfg != nil && cfg.Output.Editor != "" {
+		return cfg.Output.Editor
 	}
 	if runtime.GOOS == "windows" {
 		return "notepad"
 	}
-	// Prefer nano; fall back to vi which is ubiquitous.
 	if _, err := exec.LookPath("nano"); err == nil {
 		return "nano"
 	}

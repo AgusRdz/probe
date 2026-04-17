@@ -43,8 +43,9 @@ type ExportConfig struct {
 
 // OutputConfig controls CLI presentation.
 type OutputConfig struct {
-	NoColor    bool `yaml:"no_color"`
-	JSONIndent int  `yaml:"json_indent"`
+	NoColor    bool   `yaml:"no_color"`
+	JSONIndent int    `yaml:"json_indent"`
+	Editor     string `yaml:"editor"` // editor for 'probe config edit'; overrides platform default
 }
 
 // ListConfig controls the probe list display.

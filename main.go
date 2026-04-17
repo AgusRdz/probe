@@ -42,7 +42,7 @@ func main() {
 	case "scan":
 		cmd.RunScan(os.Args[2:], cfg)
 	case "config":
-		cmd.RunConfig(os.Args[2:])
+		cmd.RunConfig(os.Args[2:], cfg)
 	case "update":
 		cmd.RunUpdate(os.Args[2:])
 	case "version", "--version", "-v":
@@ -163,7 +163,7 @@ func printCommandHelp(command string) {
 	case "scan":
 		cmd.RunScan([]string{"--help"}, &config.Config{})
 	case "config":
-		cmd.RunConfig([]string{"show"})
+		cmd.RunConfig([]string{"show"}, &config.Config{})
 	default:
 		fmt.Fprintf(os.Stderr, "probe: unknown command %q\n\nRun 'probe help' for usage.\n", command)
 		os.Exit(1)
