@@ -40,6 +40,12 @@ var reMinimalLambdaParam = regexp.MustCompile(
 // Results.Ok<TypeName>() response type extraction
 var reMinimalResultsOk = regexp.MustCompile(`Results\.Ok<(\w+)>\s*\(`)
 
+// .RequireAuthorization( — requires auth
+var reMinimalRequireAuth = regexp.MustCompile(`\.RequireAuthorization\(`)
+
+// .AllowAnonymous( — explicitly public
+var reMinimalAllowAnon = regexp.MustCompile(`\.AllowAnonymous\(`)
+
 // Extract walks dir and returns all discovered Minimal API endpoints.
 func (e *aspnetMinimalExtractor) Extract(dir string, cfg *config.ScanConfig) ([]ScannedEndpoint, error) {
 	// Collect C# schemas shared with MVC extractor.
@@ -112,13 +118,16 @@ func extractASPNetMinimalFile(path string, schemas map[string]*observer.Schema) 
 			fullPath = strings.ReplaceAll(fullPath, "//", "/")
 		}
 
+		requiresAuth := reMinimalRequireAuth.MatchString(line) && !reMinimalAllowAnon.MatchString(line)
+
 		ep := ScannedEndpoint{
-			Method:      method,
-			PathPattern: fullPath,
-			Protocol:    "rest",
-			Framework:   "aspnet-minimal",
-			SourceFile:  absPath,
-			SourceLine:  i + 1,
+			Method:       method,
+			PathPattern:  fullPath,
+			Protocol:     "rest",
+			Framework:    "aspnet-minimal",
+			SourceFile:   absPath,
+			SourceLine:   i + 1,
+			RequiresAuth: requiresAuth,
 		}
 
 		// Lambda param type extraction.

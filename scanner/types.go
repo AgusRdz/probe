@@ -28,6 +28,7 @@ type ScannedEndpoint struct {
 	Tags        []string         // from @ApiTags, namespace, group name
 	Params      []ExtractedParam
 	Deprecated  bool
+	RequiresAuth bool
 }
 
 // Extractor discovers routes from source files.

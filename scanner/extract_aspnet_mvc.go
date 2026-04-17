@@ -54,6 +54,12 @@ var reCSEmailAddress = regexp.MustCompile(`\[EmailAddress\]`)
 // [Obsolete] attribute — maps to deprecated
 var reCSObsolete = regexp.MustCompile(`\[Obsolete`)
 
+// [Authorize] or [Authorize(...)] — requires authentication
+var reCSAuthorize = regexp.MustCompile(`\[Authorize(?:\s*\([^)]*\))?\]`)
+
+// [AllowAnonymous] — explicitly public
+var reCSAllowAnonymous = regexp.MustCompile(`\[AllowAnonymous\]`)
+
 // [ActionName("login")] — .NET Framework Web API conventional routing action override
 var reCSActionName = regexp.MustCompile(`\[ActionName\s*\(\s*"([^"]+)"\s*\)\]`)
 
@@ -164,6 +170,7 @@ func extractASPNetMVCFile(path string, schemas map[string]*observer.Schema, conv
 	classPrefix := ""
 	controllerBasePath := ""
 	deprecated := false
+	classRequiresAuth := false
 	for _, line := range lines {
 		if m := reCSController.FindStringSubmatch(line); m != nil {
 			controllerBasePath = "/" + strings.ToLower(strings.TrimSuffix(m[1], "Controller"))
@@ -190,6 +197,9 @@ func extractASPNetMVCFile(path string, schemas map[string]*observer.Schema, conv
 			classPrefixLine = idx
 			break
 		}
+		if reCSAuthorize.MatchString(t) {
+			classRequiresAuth = true
+		}
 	}
 
 	if classPrefix == "" {
@@ -206,6 +216,8 @@ func extractASPNetMVCFile(path string, schemas map[string]*observer.Schema, conv
 	var pendingActionName string  // from [ActionName("xxx")]
 	var pendingDeprecated bool
 	var pendingDescription string
+	var pendingRequiresAuth bool
+	var pendingAllowAnonymous bool
 
 	for i, line := range lines {
 		trimmed := strings.TrimSpace(line)
@@ -216,6 +228,14 @@ func extractASPNetMVCFile(path string, schemas map[string]*observer.Schema, conv
 		// Track [Obsolete] for next method.
 		if reCSObsolete.MatchString(trimmed) {
 			pendingDeprecated = true
+			continue
+		}
+		if reCSAuthorize.MatchString(trimmed) {
+			pendingRequiresAuth = true
+			continue
+		}
+		if reCSAllowAnonymous.MatchString(trimmed) {
+			pendingAllowAnonymous = true
 			continue
 		}
 
@@ -298,14 +318,15 @@ func extractASPNetMVCFile(path string, schemas map[string]*observer.Schema, conv
 				fullPath = strings.TrimLeft(fullPath, "/")
 
 				ep := ScannedEndpoint{
-					Method:      pendingMethod,
-					PathPattern: fullPath,
-					Protocol:    "rest",
-					Framework:   "aspnet-mvc",
-					SourceFile:  absPath,
-					SourceLine:  i + 1,
-					Deprecated:  pendingDeprecated || deprecated,
-					Description: pendingDescription,
+					Method:       pendingMethod,
+					PathPattern:  fullPath,
+					Protocol:     "rest",
+					Framework:    "aspnet-mvc",
+					SourceFile:   absPath,
+					SourceLine:   i + 1,
+					Deprecated:   pendingDeprecated || deprecated,
+					Description:  pendingDescription,
+					RequiresAuth: !pendingAllowAnonymous && (classRequiresAuth || pendingRequiresAuth),
 				}
 
 				// Resolve response schema.
@@ -329,6 +350,8 @@ func extractASPNetMVCFile(path string, schemas map[string]*observer.Schema, conv
 				pendingActionName = ""
 				pendingDeprecated = false
 				pendingDescription = ""
+				pendingRequiresAuth = false
+				pendingAllowAnonymous = false
 			}
 		}
 	}

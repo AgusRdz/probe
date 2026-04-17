@@ -110,18 +110,19 @@ func RunScan(args []string, cfg *config.Config) {
 	var newCount, updatedCount int
 	for _, ep := range endpoints {
 		wasNew, err := s.UpsertScannedEndpoint(store.ScannedEndpointInput{
-			Method:      ep.Method,
-			PathPattern: ep.PathPattern,
-			Protocol:    ep.Protocol,
-			Framework:   ep.Framework,
-			SourceFile:  ep.SourceFile,
-			SourceLine:  ep.SourceLine,
-			ReqSchema:   ep.ReqSchema,
-			RespSchema:  ep.RespSchema,
-			StatusCodes: ep.StatusCodes,
-			Description: ep.Description,
-			Tags:        ep.Tags,
-			Deprecated:  ep.Deprecated,
+			Method:       ep.Method,
+			PathPattern:  ep.PathPattern,
+			Protocol:     ep.Protocol,
+			Framework:    ep.Framework,
+			SourceFile:   ep.SourceFile,
+			SourceLine:   ep.SourceLine,
+			ReqSchema:    ep.ReqSchema,
+			RespSchema:   ep.RespSchema,
+			StatusCodes:  ep.StatusCodes,
+			Description:  ep.Description,
+			Tags:         ep.Tags,
+			Deprecated:   ep.Deprecated,
+			RequiresAuth: ep.RequiresAuth,
 		})
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "probe scan: upsert %s %s: %v\n", ep.Method, ep.PathPattern, err)

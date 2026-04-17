@@ -46,6 +46,9 @@ var reFastAPIField = regexp.MustCompile(`^\s{4}(\w+)\s*:\s*(Optional\[)?(\w+)`)
 
 // FastAPI path param is already {param} — no transform needed.
 
+// Depends(...) patterns that indicate authentication requirements.
+var reFastAPIAuthDepend = regexp.MustCompile(`Depends\s*\(\s*(?:get_current_user|oauth2_scheme|security|get_current_active_user|verify_token|authenticate)`)
+
 // Extract walks dir and returns all discovered FastAPI endpoints.
 func (e *fastAPIExtractor) Extract(dir string, cfg *config.ScanConfig) ([]ScannedEndpoint, error) {
 	// First pass: collect all Pydantic models across all .py files.
@@ -200,6 +203,10 @@ func extractFastAPIFile(path string, models map[string]*observer.Schema) ([]Scan
 				if s, ok := models[typeName]; ok {
 					ep.ReqSchema = s
 				}
+			}
+			// Auth dependency in function signature.
+			if reFastAPIAuthDepend.MatchString(lines[j]) {
+				ep.RequiresAuth = true
 			}
 			// Docstring — first triple-quoted line.
 			if ep.Description == "" {

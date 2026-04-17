@@ -16,6 +16,7 @@ CREATE TABLE IF NOT EXISTS endpoints (
     description     TEXT    NOT NULL DEFAULT '',
     tags_json       TEXT    NOT NULL DEFAULT '[]',
     deprecated      INTEGER NOT NULL DEFAULT 0,
+    requires_auth   INTEGER NOT NULL DEFAULT 0,
     UNIQUE(method, path_pattern)
 );
 
@@ -80,3 +81,9 @@ CREATE TABLE IF NOT EXISTS query_params (
 CREATE INDEX IF NOT EXISTS idx_endpoint_headers_ep ON endpoint_headers (endpoint_id);
 CREATE INDEX IF NOT EXISTS idx_query_params_ep     ON query_params (endpoint_id);
 `
+
+// migrateSQL contains ALTER TABLE statements for adding columns introduced after
+// the initial schema. Each statement is run with error ignored (column may already exist).
+var migrateSQL = []string{
+	`ALTER TABLE endpoints ADD COLUMN requires_auth INTEGER NOT NULL DEFAULT 0`,
+}

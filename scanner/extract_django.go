@@ -47,6 +47,10 @@ var reDjangoSerializerFields = regexp.MustCompile(`fields\s*=\s*\[([^\]]+)\]`)
 // Django include() for nested urls.
 var reDjangoInclude = regexp.MustCompile(`include\s*\(\s*["']([^"']+)["']`)
 
+// Django/DRF auth decorators and permission classes
+var reDjangoLoginRequired = regexp.MustCompile(`@(?:login_required|permission_required|staff_member_required)`)
+var reDjangoIsAuth        = regexp.MustCompile(`IsAuthenticated|IsAdminUser|permission_classes\s*=\s*\[`)
+
 // DRF ViewSet CRUD methods exposed by router.register.
 var djangoCRUDMethods = []struct {
 	method string
@@ -153,21 +157,47 @@ func extractDjangoFile(path string, serializers map[string]*observer.Schema) ([]
 	}
 
 	absPath, _ := filepath.Abs(path)
+
+	// Pre-scan: check if file uses IsAuthenticated or permission_classes globally.
+	fileRequiresAuth := false
+	for _, line := range lines {
+		if reDjangoIsAuth.MatchString(line) {
+			fileRequiresAuth = true
+			break
+		}
+	}
+
 	var endpoints []ScannedEndpoint
 
 	for i, line := range lines {
+		// Check preceding lines (up to 5) for auth decorators above view functions.
+		pendingRequiresAuth := fileRequiresAuth
+		if !pendingRequiresAuth {
+			start := i - 5
+			if start < 0 {
+				start = 0
+			}
+			for k := start; k < i; k++ {
+				if reDjangoLoginRequired.MatchString(lines[k]) {
+					pendingRequiresAuth = true
+					break
+				}
+			}
+		}
+
 		// path("users/", View.as_view()) → GET + POST
 		if m := reDjangoPath.FindStringSubmatch(line); m != nil {
 			rawPath := "/" + strings.TrimLeft(m[1], "/")
 			normalizedPath := normalizeDjangoPath(rawPath)
 			for _, method := range []string{"GET", "POST"} {
 				endpoints = append(endpoints, ScannedEndpoint{
-					Method:      method,
-					PathPattern: normalizedPath,
-					Protocol:    "rest",
-					Framework:   "django",
-					SourceFile:  absPath,
-					SourceLine:  i + 1,
+					Method:       method,
+					PathPattern:  normalizedPath,
+					Protocol:     "rest",
+					Framework:    "django",
+					SourceFile:   absPath,
+					SourceLine:   i + 1,
+					RequiresAuth: pendingRequiresAuth,
 				})
 			}
 		}
@@ -177,12 +207,13 @@ func extractDjangoFile(path string, serializers map[string]*observer.Schema) ([]
 			base := "/" + strings.TrimLeft(m[1], "/")
 			for _, c := range djangoCRUDMethods {
 				endpoints = append(endpoints, ScannedEndpoint{
-					Method:      c.method,
-					PathPattern: base + c.suffix,
-					Protocol:    "rest",
-					Framework:   "django",
-					SourceFile:  absPath,
-					SourceLine:  i + 1,
+					Method:       c.method,
+					PathPattern:  base + c.suffix,
+					Protocol:     "rest",
+					Framework:    "django",
+					SourceFile:   absPath,
+					SourceLine:   i + 1,
+					RequiresAuth: pendingRequiresAuth,
 				})
 			}
 		}

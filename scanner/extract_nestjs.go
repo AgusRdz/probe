@@ -54,6 +54,9 @@ var (
 	reMaxLength      = regexp.MustCompile(`@MaxLength\s*\(\s*(\d+)`)
 	reApiPropDesc    = regexp.MustCompile(`@ApiProperty\s*\(\s*\{[^}]*description\s*:\s*['"]([^'"]+)['"]`)
 	reNestReturnType = regexp.MustCompile(`Promise\s*<\s*(\w+)\s*>`)
+
+	reNestJSUseGuards = regexp.MustCompile(`@UseGuards\s*\(`)
+	reNestJSPublic    = regexp.MustCompile(`@Public\s*\(\s*\)`)
 )
 
 // Extract walks dir and returns all discovered NestJS endpoints.
@@ -92,18 +95,21 @@ type controllerState struct {
 	prefix     string
 	tags       []string
 	deprecated bool
+	hasGuards  bool
 }
 
 // methodRouteInfo holds information gathered around a handler method.
 type methodRouteInfo struct {
-	httpMethod  string
-	path        string
-	body        string
-	params      []ExtractedParam
-	tags        []string
-	deprecated  bool
-	description string
-	returnType  string
+	httpMethod   string
+	path         string
+	body         string
+	params       []ExtractedParam
+	tags         []string
+	deprecated   bool
+	description  string
+	returnType   string
+	hasGuards    bool
+	isPublic     bool
 }
 
 // extractNestJSFile parses a single file for NestJS controller routes.
@@ -135,6 +141,8 @@ func extractNestJSFile(rootDir, path string) ([]ScannedEndpoint, error) {
 	var pendingTags []string
 	var pendingDeprecated bool
 	var pendingDescription string
+	var pendingHasGuards bool
+	var pendingIsPublic bool
 
 	// Class-level type definitions keyed by class name.
 	classDefs := extractClassDefs(lines)
@@ -150,15 +158,16 @@ func extractNestJSFile(rootDir, path string) ([]ScannedEndpoint, error) {
 		combined = NormalizeFrameworkPath(combined)
 
 		ep := ScannedEndpoint{
-			Method:      pendingRoute.httpMethod,
-			PathPattern: combined,
-			Protocol:    "rest",
-			Framework:   "nestjs",
-			SourceFile:  absPath,
-			SourceLine:  lineNo,
-			Tags:        mergeTags(ctrl.tags, pendingRoute.tags),
-			Deprecated:  ctrl.deprecated || pendingRoute.deprecated,
-			Description: pendingRoute.description,
+			Method:       pendingRoute.httpMethod,
+			PathPattern:  combined,
+			Protocol:     "rest",
+			Framework:    "nestjs",
+			SourceFile:   absPath,
+			SourceLine:   lineNo,
+			Tags:         mergeTags(ctrl.tags, pendingRoute.tags),
+			Deprecated:   ctrl.deprecated || pendingRoute.deprecated,
+			Description:  pendingRoute.description,
+			RequiresAuth: !pendingRoute.isPublic && (ctrl.hasGuards || pendingRoute.hasGuards),
 		}
 
 		// Resolve @Body DTO class.
@@ -200,6 +209,16 @@ func extractNestJSFile(rootDir, path string) ([]ScannedEndpoint, error) {
 			pendingDeprecated = true
 		}
 
+		// @UseGuards(...) — requires authentication
+		if reNestJSUseGuards.MatchString(trimmed) {
+			pendingHasGuards = true
+		}
+
+		// @Public() — explicitly public
+		if reNestJSPublic.MatchString(trimmed) {
+			pendingIsPublic = true
+		}
+
 		// JSDoc description.
 		if dm := reJSDocDescription.FindStringSubmatch(trimmed); dm != nil {
 			pendingDescription = strings.TrimSpace(dm[1])
@@ -212,10 +231,13 @@ func extractNestJSFile(rootDir, path string) ([]ScannedEndpoint, error) {
 				prefix:     m[1],
 				tags:       pendingTags,
 				deprecated: pendingDeprecated,
+				hasGuards:  pendingHasGuards,
 			}
 			pendingTags = nil
 			pendingDeprecated = false
 			pendingDescription = ""
+			pendingHasGuards = false
+			pendingIsPublic = false
 			continue
 		}
 		// @Controller() with no path.
@@ -224,10 +246,13 @@ func extractNestJSFile(rootDir, path string) ([]ScannedEndpoint, error) {
 			ctrl = &controllerState{
 				tags:       pendingTags,
 				deprecated: pendingDeprecated,
+				hasGuards:  pendingHasGuards,
 			}
 			pendingTags = nil
 			pendingDeprecated = false
 			pendingDescription = ""
+			pendingHasGuards = false
+			pendingIsPublic = false
 			continue
 		}
 
@@ -245,10 +270,14 @@ func extractNestJSFile(rootDir, path string) ([]ScannedEndpoint, error) {
 				tags:        pendingTags,
 				deprecated:  pendingDeprecated,
 				description: pendingDescription,
+				hasGuards:   pendingHasGuards,
+				isPublic:    pendingIsPublic,
 			}
 			pendingTags = nil
 			pendingDeprecated = false
 			pendingDescription = ""
+			pendingHasGuards = false
+			pendingIsPublic = false
 			continue
 		}
 

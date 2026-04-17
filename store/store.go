@@ -35,6 +35,7 @@ type Endpoint struct {
 	Description string
 	Tags        []string
 	Deprecated  bool
+	RequiresAuth bool
 }
 
 // Observation represents a single captured request/response pair.
@@ -120,6 +121,11 @@ func Open(path string) (*Store, error) {
 	if _, err := db.Exec(createSQL); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("store: apply schema: %w", err)
+	}
+
+	// Run migrations — each statement is best-effort (column may already exist).
+	for _, stmt := range migrateSQL {
+		db.Exec(stmt) //nolint:errcheck
 	}
 
 	return &Store{db: db}, nil
@@ -256,7 +262,7 @@ func (s *Store) GetEndpoints() ([]Endpoint, error) {
 	rows, err := s.db.Query(`
 		SELECT id, method, path_pattern, protocol, source, framework,
 		       source_file, source_line, first_seen, last_seen,
-		       call_count, description, tags_json, deprecated
+		       call_count, description, tags_json, deprecated, requires_auth
 		FROM endpoints
 		ORDER BY path_pattern, method`)
 	if err != nil {
@@ -272,7 +278,7 @@ func (s *Store) GetEndpointByID(id int64) (*Endpoint, error) {
 	rows, err := s.db.Query(`
 		SELECT id, method, path_pattern, protocol, source, framework,
 		       source_file, source_line, first_seen, last_seen,
-		       call_count, description, tags_json, deprecated
+		       call_count, description, tags_json, deprecated, requires_auth
 		FROM endpoints
 		WHERE id = ?`, id)
 	if err != nil {
@@ -497,6 +503,7 @@ type ScannedEndpointInput struct {
 	Description string
 	Tags        []string
 	Deprecated  bool
+	RequiresAuth bool
 }
 
 // UpsertScannedEndpoint stores a ScannedEndpoint discovered by probe scan.
@@ -528,6 +535,11 @@ func (s *Store) UpsertScannedEndpoint(input ScannedEndpointInput) (bool, error) 
 		deprecated = 1
 	}
 
+	requiresAuth := 0
+	if input.RequiresAuth {
+		requiresAuth = 1
+	}
+
 	tagsJSON, err := json.Marshal(input.Tags)
 	if err != nil {
 		return false, fmt.Errorf("store: marshal tags: %w", err)
@@ -544,11 +556,12 @@ func (s *Store) UpsertScannedEndpoint(input ScannedEndpointInput) (bool, error) 
 		    source_line = ?,
 		    description = ?,
 		    deprecated  = ?,
+		    requires_auth = ?,
 		    tags_json   = ?,
 		    last_seen   = ?
 		WHERE method = ? AND path_pattern = ?`,
 		input.Framework, input.SourceFile, input.SourceLine,
-		input.Description, deprecated, string(tagsJSON), now,
+		input.Description, deprecated, requiresAuth, string(tagsJSON), now,
 		input.Method, input.PathPattern,
 	)
 	if err != nil {
@@ -1016,12 +1029,13 @@ func scanEndpoints(rows *sql.Rows) ([]Endpoint, error) {
 		var firstSeen, lastSeen string
 		var tagsJSON string
 		var deprecated int
+		var requiresAuth int
 
 		if err := rows.Scan(
 			&e.ID, &e.Method, &e.PathPattern, &e.Protocol,
 			&e.Source, &e.Framework, &e.SourceFile, &e.SourceLine,
 			&firstSeen, &lastSeen, &e.CallCount,
-			&e.Description, &tagsJSON, &deprecated,
+			&e.Description, &tagsJSON, &deprecated, &requiresAuth,
 		); err != nil {
 			return nil, fmt.Errorf("store: scan endpoint row: %w", err)
 		}
@@ -1029,6 +1043,7 @@ func scanEndpoints(rows *sql.Rows) ([]Endpoint, error) {
 		e.FirstSeen, _ = time.Parse(time.RFC3339, firstSeen)
 		e.LastSeen, _ = time.Parse(time.RFC3339, lastSeen)
 		e.Deprecated = deprecated != 0
+		e.RequiresAuth = requiresAuth != 0
 
 		if err := json.Unmarshal([]byte(tagsJSON), &e.Tags); err != nil {
 			e.Tags = []string{}

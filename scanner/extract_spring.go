@@ -62,6 +62,11 @@ var reJavaEmailAnnotation = regexp.MustCompile(`@Email`)
 // @Deprecated annotation
 var reJavaDeprecated = regexp.MustCompile(`@Deprecated`)
 
+// @PreAuthorize, @Secured, @RolesAllowed — require authentication
+var reSpringPreAuthorize = regexp.MustCompile(`@PreAuthorize\s*\(`)
+var reSpringSecured       = regexp.MustCompile(`@Secured\s*\(`)
+var reSpringRolesAllowed  = regexp.MustCompile(`@RolesAllowed\s*\(`)
+
 // @Size(min=N, max=M)
 var reJavaSize = regexp.MustCompile(`@Size\s*\([^)]*min\s*=\s*(\d+)[^)]*max\s*=\s*(\d+)`)
 
@@ -121,10 +126,14 @@ func extractSpringFile(path string, schemas map[string]*observer.Schema) ([]Scan
 
 	// Find class-level @RequestMapping prefix.
 	classPrefix := ""
+	classRequiresAuth := false
 	for _, line := range lines {
 		if m := reSpringRequestMapping.FindStringSubmatch(line); m != nil {
 			classPrefix = m[1]
-			break
+		}
+		t := strings.TrimSpace(line)
+		if reSpringPreAuthorize.MatchString(t) || reSpringSecured.MatchString(t) || reSpringRolesAllowed.MatchString(t) {
+			classRequiresAuth = true
 		}
 	}
 
@@ -133,12 +142,18 @@ func extractSpringFile(path string, schemas map[string]*observer.Schema) ([]Scan
 	var pendingMethodPath string
 	var pendingDeprecated bool
 	var pendingDescription string
+	var pendingRequiresAuth bool
 
 	for i, line := range lines {
 		trimmed := strings.TrimSpace(line)
 
 		if reJavaDeprecated.MatchString(trimmed) {
 			pendingDeprecated = true
+			continue
+		}
+
+		if reSpringPreAuthorize.MatchString(trimmed) || reSpringSecured.MatchString(trimmed) || reSpringRolesAllowed.MatchString(trimmed) {
+			pendingRequiresAuth = true
 			continue
 		}
 
@@ -168,14 +183,15 @@ func extractSpringFile(path string, schemas map[string]*observer.Schema) ([]Scan
 				}
 
 				ep := ScannedEndpoint{
-					Method:      pendingMethod,
-					PathPattern: fullPath,
-					Protocol:    "rest",
-					Framework:   "spring",
-					SourceFile:  absPath,
-					SourceLine:  i + 1,
-					Deprecated:  pendingDeprecated,
-					Description: pendingDescription,
+					Method:       pendingMethod,
+					PathPattern:  fullPath,
+					Protocol:     "rest",
+					Framework:    "spring",
+					SourceFile:   absPath,
+					SourceLine:   i + 1,
+					Deprecated:   pendingDeprecated,
+					Description:  pendingDescription,
+					RequiresAuth: classRequiresAuth || pendingRequiresAuth,
 				}
 
 				if responseType != "" && responseType != "Void" && responseType != "void" {
@@ -196,6 +212,7 @@ func extractSpringFile(path string, schemas map[string]*observer.Schema) ([]Scan
 				pendingMethodPath = ""
 				pendingDeprecated = false
 				pendingDescription = ""
+				pendingRequiresAuth = false
 			}
 		}
 	}

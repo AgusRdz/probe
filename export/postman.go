@@ -138,6 +138,24 @@ func GeneratePostman(s StoreReader, opts ExportOptions) (*PostmanCollection, err
 			})
 		}
 
+		// Add Authorization header for auth-required endpoints not already covered
+		// by observed traffic headers.
+		if ep.RequiresAuth {
+			hasAuth := false
+			for _, h := range headers {
+				if strings.ToLower(h.Key) == "authorization" {
+					hasAuth = true
+					break
+				}
+			}
+			if !hasAuth {
+				headers = append(headers, PostmanHeader{
+					Key:   "Authorization",
+					Value: "Bearer {{token}}",
+				})
+			}
+		}
+
 		reqSchema := buildSchemaFromConfidence(fieldRows, "request", opts.ConfidenceThreshold)
 		if reqSchema != nil {
 			template := schemaToJSONTemplate(reqSchema)

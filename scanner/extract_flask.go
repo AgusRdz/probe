@@ -41,6 +41,9 @@ var reFlaskBlueprintPrefix = regexp.MustCompile(
 // flask-pydantic @validate(body=Schema)
 var reFlaskPydanticValidate = regexp.MustCompile(`@validate\s*\([^)]*body\s*=\s*(\w+)`)
 
+// Auth decorators above Flask route handlers
+var reFlaskAuthDecorator = regexp.MustCompile(`@(?:login_required|jwt_required|token_required|auth\.login_required|requires_auth)`)
+
 // Extract walks dir and returns all discovered Flask endpoints.
 func (e *flaskExtractor) Extract(dir string, cfg *config.ScanConfig) ([]ScannedEndpoint, error) {
 	// Collect Pydantic models in case flask-pydantic is used.
@@ -112,6 +115,19 @@ func extractFlaskFile(path string, models map[string]*observer.Schema) ([]Scanne
 			methods = parseFlaskMethods(mm[1])
 		}
 
+		// Check preceding lines for auth decorators.
+		requiresAuth := false
+		start := i - 5
+		if start < 0 {
+			start = 0
+		}
+		for k := start; k < i; k++ {
+			if reFlaskAuthDecorator.MatchString(lines[k]) {
+				requiresAuth = true
+				break
+			}
+		}
+
 		// Check next few lines for @validate(body=...).
 		var reqSchema *observer.Schema
 		end := i + 5
@@ -128,13 +144,14 @@ func extractFlaskFile(path string, models map[string]*observer.Schema) ([]Scanne
 
 		for _, method := range methods {
 			ep := ScannedEndpoint{
-				Method:      method,
-				PathPattern: fullPath,
-				Protocol:    "rest",
-				Framework:   "flask",
-				SourceFile:  absPath,
-				SourceLine:  i + 1,
-				ReqSchema:   reqSchema,
+				Method:       method,
+				PathPattern:  fullPath,
+				Protocol:     "rest",
+				Framework:    "flask",
+				SourceFile:   absPath,
+				SourceLine:   i + 1,
+				ReqSchema:    reqSchema,
+				RequiresAuth: requiresAuth,
 			}
 			endpoints = append(endpoints, ep)
 		}
