@@ -144,10 +144,20 @@ func atomicReplace(data []byte) error {
 		return err
 	}
 
-	if err := os.Rename(tmp, exe); err != nil {
+	// On Windows a running binary cannot be overwritten, but it can be renamed.
+	// Rename current → .old to free the name, then rename .tmp → current.
+	old := exe + ".old"
+	os.Remove(old) //nolint:errcheck — clean up any leftover from a previous update
+	if err := os.Rename(exe, old); err != nil {
 		os.Remove(tmp) //nolint:errcheck
 		return err
 	}
+	if err := os.Rename(tmp, exe); err != nil {
+		os.Rename(old, exe) //nolint:errcheck — restore original
+		os.Remove(tmp)      //nolint:errcheck
+		return err
+	}
+	os.Remove(old) //nolint:errcheck — best-effort cleanup
 	return nil
 }
 
