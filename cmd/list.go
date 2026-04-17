@@ -4,6 +4,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/AgusRdz/probe/config"
 	"github.com/AgusRdz/probe/render"
@@ -25,9 +26,19 @@ func RunList(args []string, cfg *config.Config) {
 	source := fs.String("source", "", `filter by source: "scan", "observed", "scan+obs"`)
 	protocol := fs.String("protocol", "", `filter by protocol: "rest", "graphql", "grpc"`)
 	db := fs.String("db", "", "override DB path")
+	cols := fs.String("cols", "", `columns to display, comma-separated (default from config)
+    available: method, path, source, file, calls, confidence, protocol, status, framework
+    example:   --cols method,path,source,file`)
 
 	if err := fs.Parse(args); err != nil {
 		os.Exit(1)
+	}
+
+	columns := render.DefaultColumns
+	if *cols != "" {
+		columns = splitCols(*cols)
+	} else if cfg.List.Columns != "" {
+		columns = splitCols(cfg.List.Columns)
 	}
 
 	s, err := store.Open(*db)
@@ -49,7 +60,20 @@ func RunList(args []string, cfg *config.Config) {
 		MinCalls: *minCalls,
 		Source:   *source,
 		Protocol: *protocol,
+		Columns:  columns,
 	}
 
 	render.PrintTable(os.Stdout, endpoints, nil, opts)
+}
+
+func splitCols(s string) []string {
+	parts := strings.Split(s, ",")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
 }

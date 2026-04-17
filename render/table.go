@@ -3,11 +3,29 @@ package render
 import (
 	"fmt"
 	"io"
+	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/AgusRdz/probe/store"
 )
+
+// Column name constants.
+const (
+	ColMethod     = "method"
+	ColPath       = "path"
+	ColSource     = "source"
+	ColFile       = "file" // basename:line from SourceFile/SourceLine
+	ColCalls      = "calls"
+	ColConfidence = "confidence"
+	ColProtocol   = "protocol"
+	ColStatus     = "status"
+	ColFramework  = "framework"
+)
+
+// DefaultColumns is the column list used when none is configured.
+var DefaultColumns = []string{ColMethod, ColPath, ColSource, ColFile, ColCalls, ColConfidence}
 
 // TableOptions controls table rendering.
 type TableOptions struct {
@@ -16,18 +34,11 @@ type TableOptions struct {
 	MinCalls int    // 0 = show all
 	Source   string // "" = all, "scan", "observed", "scan+obs"
 	Protocol string // "" = all, "rest", "graphql", "grpc", etc.
+	Columns  []string // active columns in order; nil = DefaultColumns
 }
 
 // PrintTable writes the endpoint list to w.
-// Output format matches PLAN.md probe list output:
-//
-//	METHOD  PATH  SOURCE  CALLS  CONFIDENCE  PROTOCOL  STATUS CODES
-//
-// Columns are aligned. Confidence shown as bar + percentage.
-// SOURCE column: "scan" (yellow), "observed" (green), "scan+obs" (cyan).
-// Endpoints with 0 calls show "—" for status codes.
-// Low confidence (< 30%) shown with "← low confidence" annotation.
-// Unconfirmed path patterns (ending in "?") noted.
+// Output format is column-driven based on opts.Columns (or DefaultColumns).
 //
 // statusCodes maps endpointID → sorted status codes. Pass nil for fast mode (shows "—").
 func PrintTable(w io.Writer, endpoints []store.Endpoint, statusCodes map[int64][]int, opts TableOptions) {
@@ -37,44 +48,72 @@ func PrintTable(w io.Writer, endpoints []store.Endpoint, statusCodes map[int64][
 		return
 	}
 
-	// Compute column widths.
-	const (
-		colMethod   = 0
-		colPath     = 1
-		colSource   = 2
-		colCalls    = 3
-		colConf     = 4
-		colProtocol = 5
-		colStatus   = 6
-	)
-
-	headers := []string{"METHOD", "PATH", "SOURCE", "CALLS", "CONFIDENCE", "PROTOCOL", "STATUS CODES"}
-	widths := make([]int, len(headers))
-	for i, h := range headers {
-		widths[i] = len(h)
+	// Resolve active columns.
+	activeCols := opts.Columns
+	if len(activeCols) == 0 {
+		activeCols = DefaultColumns
 	}
 
-	type row struct {
-		method   string
-		path     string
-		source   string
-		calls    string
-		conf     string // bar + pct, plain (no ANSI) for width calc
-		protocol string
-		status   string
-		note     string
-		ep       store.Endpoint
-		confVal  float64
+	// colHeader returns the display header for a column name.
+	colHeader := func(col string) string {
+		switch col {
+		case ColMethod:
+			return "METHOD"
+		case ColPath:
+			return "PATH"
+		case ColSource:
+			return "SOURCE"
+		case ColFile:
+			return "FILE"
+		case ColCalls:
+			return "CALLS"
+		case ColConfidence:
+			return "CONFIDENCE"
+		case ColProtocol:
+			return "PROTOCOL"
+		case ColStatus:
+			return "STATUS CODES"
+		case ColFramework:
+			return "FRAMEWORK"
+		default:
+			return strings.ToUpper(col)
+		}
 	}
 
-	rows := make([]row, 0, len(filtered))
+	type rowData struct {
+		// plain values for width calculation
+		method    string
+		path      string
+		source    string
+		file      string
+		calls     string
+		conf      string // bar + pct, plain (no ANSI)
+		protocol  string
+		status    string
+		framework string
+		note      string
+		confVal   float64
+	}
+
+	// Compute column widths initialised from header lengths.
+	widths := make(map[string]int, len(activeCols))
+	for _, col := range activeCols {
+		widths[col] = len(colHeader(col))
+	}
+
+	rows := make([]rowData, 0, len(filtered))
 	for _, ep := range filtered {
 		conf := endpointConfidence(ep)
 		bar := confidenceBar(conf)
 		pct := confidencePct(conf)
-		confPlain := bar + " " + pct // for width measurement (bar is ASCII blocks, no ANSI)
+		confPlain := bar + " " + pct
 
 		sc := statusCodesStr(ep, statusCodes)
+
+		var fileVal string
+		if ep.SourceFile != "" {
+			fileVal = filepath.Base(ep.SourceFile) + ":" + strconv.Itoa(ep.SourceLine)
+		}
 
 		var note string
 		if conf < 0.30 && ep.CallCount > 0 {
@@ -83,83 +122,123 @@ func PrintTable(w io.Writer, endpoints []store.Endpoint, statusCodes map[int64][
 			note = "← not yet seen"
 		}
 
-		r := row{
-			method:   ep.Method,
-			path:     ep.PathPattern,
-			source:   ep.Source,
-			calls:    fmt.Sprintf("%d", ep.CallCount),
-			conf:     confPlain,
-			protocol: ep.Protocol,
-			status:   sc,
-			note:     note,
-			ep:       ep,
-			confVal:  conf,
+		r := rowData{
+			method:    ep.Method,
+			path:      ep.PathPattern,
+			source:    ep.Source,
+			file:      fileVal,
+			calls:     fmt.Sprintf("%d", ep.CallCount),
+			conf:      confPlain,
+			protocol:  ep.Protocol,
+			status:    sc,
+			framework: ep.Framework,
+			note:      note,
+			confVal:   conf,
 		}
 		rows = append(rows, r)
 
-		if len(r.method) > widths[colMethod] {
-			widths[colMethod] = len(r.method)
+		// Update widths.
+		plainVal := func(col string) int {
+			switch col {
+			case ColMethod:
+				return len(r.method)
+			case ColPath:
+				return len(r.path)
+			case ColSource:
+				return len(r.source)
+			case ColFile:
+				return len(r.file)
+			case ColCalls:
+				return len(r.calls)
+			case ColConfidence:
+				return len(r.conf)
+			case ColProtocol:
+				return len(r.protocol)
+			case ColStatus:
+				return len(r.status)
+			case ColFramework:
+				return len(r.framework)
+			default:
+				return 0
+			}
 		}
-		if len(r.path) > widths[colPath] {
-			widths[colPath] = len(r.path)
-		}
-		if len(r.source) > widths[colSource] {
-			widths[colSource] = len(r.source)
-		}
-		if len(r.calls) > widths[colCalls] {
-			widths[colCalls] = len(r.calls)
-		}
-		if len(confPlain) > widths[colConf] {
-			widths[colConf] = len(confPlain)
-		}
-		if len(r.protocol) > widths[colProtocol] {
-			widths[colProtocol] = len(r.protocol)
-		}
-		if len(r.status) > widths[colStatus] {
-			widths[colStatus] = len(r.status)
+		for _, col := range activeCols {
+			if v := plainVal(col); v > widths[col] {
+				widths[col] = v
+			}
 		}
 	}
 
-	// Print header.
-	headerLine := fmt.Sprintf("  %-*s  %-*s  %-*s  %-*s  %-*s  %-*s  %s",
-		widths[colMethod], headers[colMethod],
-		widths[colPath], headers[colPath],
-		widths[colSource], headers[colSource],
-		widths[colCalls], headers[colCalls],
-		widths[colConf], headers[colConf],
-		widths[colProtocol], headers[colProtocol],
-		headers[colStatus],
-	)
+	// Build and print header line.
+	var hbuf strings.Builder
+	hbuf.WriteString("  ")
+	for i, col := range activeCols {
+		h := colHeader(col)
+		if i < len(activeCols)-1 {
+			fmt.Fprintf(&hbuf, "%-*s  ", widths[col], h)
+		} else {
+			hbuf.WriteString(h)
+		}
+	}
+	headerLine := hbuf.String()
 	fmt.Fprintln(w, colorize(headerLine, colorDimStr, opts.NoColor))
 
 	// Print separator.
 	sep := "  " + strings.Repeat("─", len(headerLine)-2)
 	fmt.Fprintln(w, colorize(sep, colorDimStr, opts.NoColor))
 
+	// Print rows.
 	for _, r := range rows {
-		sourceColored := colorizeSource(r.source, opts.NoColor)
-		// Pad source accounting for ANSI escape codes added by colorizeSource.
-		sourcePad := r.source // plain for padding calc
-		sourcePadded := sourceColored + strings.Repeat(" ", widths[colSource]-len(sourcePad))
+		var lbuf strings.Builder
+		lbuf.WriteString("  ")
 
-		confColored := confidenceBarColored(r.confVal, opts.NoColor)
-		confPadded := confColored + strings.Repeat(" ", widths[colConf]-len(r.conf))
+		for i, col := range activeCols {
+			isLast := i == len(activeCols)-1
+			w := widths[col]
 
-		line := fmt.Sprintf("  %-*s  %-*s  %s  %-*s  %s  %-*s  %s",
-			widths[colMethod], r.method,
-			widths[colPath], r.path,
-			sourcePadded,
-			widths[colCalls], r.calls,
-			confPadded,
-			widths[colProtocol], r.protocol,
-			r.status,
-		)
+			switch col {
+			case ColSource:
+				// Color with ANSI, pad based on plain width.
+				colored := colorizeSource(r.source, opts.NoColor)
+				padding := strings.Repeat(" ", w-len(r.source))
+				lbuf.WriteString(colored + padding)
+			case ColConfidence:
+				// Color with ANSI, pad based on plain width.
+				colored := confidenceBarColored(r.confVal, opts.NoColor)
+				padding := strings.Repeat(" ", w-len(r.conf))
+				lbuf.WriteString(colored + padding)
+			default:
+				var plain string
+				switch col {
+				case ColMethod:
+					plain = r.method
+				case ColPath:
+					plain = r.path
+				case ColFile:
+					plain = r.file
+				case ColCalls:
+					plain = r.calls
+				case ColProtocol:
+					plain = r.protocol
+				case ColStatus:
+					plain = r.status
+				case ColFramework:
+					plain = r.framework
+				}
+				fmt.Fprintf(&lbuf, "%-*s", w, plain)
+			}
 
-		if r.note != "" {
-			line += "  " + colorize(r.note, colorDimStr, opts.NoColor)
+			if !isLast {
+				lbuf.WriteString("  ")
+			}
 		}
 
-		fmt.Fprintln(w, line)
+		if r.note != "" {
+			lbuf.WriteString("  ")
+			lbuf.WriteString(colorize(r.note, colorDimStr, opts.NoColor))
+		}
+
+		fmt.Fprintln(w, lbuf.String())
 	}
 
 	fmt.Fprintf(w, "\n  %s\n", colorize(fmt.Sprintf("%d endpoint(s)", len(rows)), colorDimStr, opts.NoColor))

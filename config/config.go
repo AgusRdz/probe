@@ -47,6 +47,11 @@ type OutputConfig struct {
 	JSONIndent int  `yaml:"json_indent"`
 }
 
+// ListConfig controls the probe list display.
+type ListConfig struct {
+	Columns string `yaml:"columns"` // comma-separated, e.g. "method,path,source,file,calls,confidence"
+}
+
 // PathOverride pins a normalised pattern to a fixed string.
 type PathOverride struct {
 	Pattern string `yaml:"pattern"`
@@ -60,6 +65,7 @@ type Config struct {
 	Inference     InferenceConfig `yaml:"inference"`
 	Export        ExportConfig    `yaml:"export"`
 	Output        OutputConfig    `yaml:"output"`
+	List          ListConfig      `yaml:"list"`
 	PathOverrides []PathOverride  `yaml:"path_overrides"`
 }
 
@@ -101,6 +107,9 @@ func Default() *Config {
 		Output: OutputConfig{
 			NoColor:    false,
 			JSONIndent: 2,
+		},
+		List: ListConfig{
+			Columns: "method,path,source,file,calls,confidence",
 		},
 		PathOverrides: []PathOverride{},
 	}
@@ -224,6 +233,11 @@ func merge(base, override *Config) {
 	}
 	if override.Output.JSONIndent != 0 {
 		base.Output.JSONIndent = override.Output.JSONIndent
+	}
+
+	// List
+	if override.List.Columns != "" {
+		base.List.Columns = override.List.Columns
 	}
 
 	// PathOverrides: project appends to global
