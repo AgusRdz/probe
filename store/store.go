@@ -227,23 +227,38 @@ func (s *Store) Record(pair observer.CapturedPair, reqSchema, respSchema *observ
 		return fmt.Errorf("store: marshal resp schema: %w", err)
 	}
 
-	// Insert the observation row.
+	// Compute variant fingerprint and upsert the variant row.
+	fingerprint := computeVariantFingerprint(pair, reqSchema)
+	variantID, err := upsertVariantTx(tx, endpointID, fingerprint, now)
+	if err != nil {
+		return err
+	}
+
+	// Insert the observation row (with variant_id).
 	if _, err := tx.Exec(`
 		INSERT INTO observations
 			(endpoint_id, observed_at, status_code, req_schema_json, resp_schema_json,
-			 req_content_type, resp_content_type, latency_ms)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+			 req_content_type, resp_content_type, latency_ms, variant_id)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		endpointID, now, pair.StatusCode, reqJSON, respJSON,
-		pair.ReqContentType, pair.RespContentType, pair.LatencyMs,
+		pair.ReqContentType, pair.RespContentType, pair.LatencyMs, variantID,
 	); err != nil {
 		return fmt.Errorf("store: record observation: %w", err)
 	}
 
-	// Update field confidence for request and response schemas.
+	// Update field confidence for request and response schemas (endpoint-level, unchanged).
 	if err := updateFieldConfidenceTx(tx, endpointID, "request", reqSchema); err != nil {
 		return err
 	}
 	if err := updateFieldConfidenceTx(tx, endpointID, "response", respSchema); err != nil {
+		return err
+	}
+
+	// Update variant-scoped field confidence.
+	if err := updateVariantFieldConfidenceTx(tx, variantID, "request", reqSchema); err != nil {
+		return err
+	}
+	if err := updateVariantFieldConfidenceTx(tx, variantID, "response", respSchema); err != nil {
 		return err
 	}
 

@@ -82,8 +82,30 @@ CREATE INDEX IF NOT EXISTS idx_endpoint_headers_ep ON endpoint_headers (endpoint
 CREATE INDEX IF NOT EXISTS idx_query_params_ep     ON query_params (endpoint_id);
 `
 
-// migrateSQL contains ALTER TABLE statements for adding columns introduced after
-// the initial schema. Each statement is run with error ignored (column may already exist).
+// migrateSQL contains DDL statements for schema additions introduced after the
+// initial release. Each statement is run with error ignored (object may already exist).
 var migrateSQL = []string{
 	`ALTER TABLE endpoints ADD COLUMN requires_auth INTEGER NOT NULL DEFAULT 0`,
+	`ALTER TABLE observations ADD COLUMN variant_id INTEGER REFERENCES request_variants(id)`,
+	`CREATE TABLE IF NOT EXISTS request_variants (
+		id           INTEGER PRIMARY KEY AUTOINCREMENT,
+		endpoint_id  INTEGER NOT NULL REFERENCES endpoints(id) ON DELETE CASCADE,
+		fingerprint  TEXT    NOT NULL,
+		label        TEXT    NOT NULL DEFAULT '',
+		first_seen   TEXT    NOT NULL,
+		last_seen    TEXT    NOT NULL,
+		call_count   INTEGER NOT NULL DEFAULT 0,
+		UNIQUE(endpoint_id, fingerprint)
+	)`,
+	`CREATE TABLE IF NOT EXISTS variant_field_confidence (
+		variant_id  INTEGER NOT NULL REFERENCES request_variants(id) ON DELETE CASCADE,
+		location    TEXT    NOT NULL,
+		field_path  TEXT    NOT NULL,
+		seen_count  INTEGER NOT NULL DEFAULT 0,
+		total_calls INTEGER NOT NULL DEFAULT 0,
+		type_json   TEXT    NOT NULL DEFAULT '{}',
+		PRIMARY KEY (variant_id, location, field_path)
+	)`,
+	`CREATE INDEX IF NOT EXISTS idx_variants_endpoint   ON request_variants (endpoint_id)`,
+	`CREATE INDEX IF NOT EXISTS idx_vfc_variant_loc     ON variant_field_confidence (variant_id, location)`,
 }
