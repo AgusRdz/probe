@@ -65,15 +65,53 @@ func computeVariantFingerprint(pair observer.CapturedPair, reqSchema *observer.S
 	return "auth:" + authScheme + "|body:" + strings.Join(fields, ",")
 }
 
+// autoVariantLabel returns a human-readable label derived from the fingerprint.
+// Returns empty string when no recognisable pattern is found.
+func autoVariantLabel(fingerprint string) string {
+	// Extract auth scheme and body fields from "auth:<scheme>|body:<fields>".
+	parts := strings.SplitN(fingerprint, "|", 2)
+	if len(parts) != 2 {
+		return ""
+	}
+	authPart := strings.TrimPrefix(parts[0], "auth:")
+	bodyPart := strings.TrimPrefix(parts[1], "body:")
+
+	switch authPart {
+	case "bearer":
+		return "authenticated"
+	case "basic":
+		return "basic-auth"
+	case "apikey":
+		return "api-key"
+	}
+
+	// auth:none — try to identify by body field set.
+	if bodyPart == "token" {
+		return "token-login"
+	}
+	fields := strings.Split(bodyPart, ",")
+	fieldSet := make(map[string]bool, len(fields))
+	for _, f := range fields {
+		fieldSet[f] = true
+	}
+	if fieldSet["password"] && (fieldSet["username"] || fieldSet["email"]) {
+		return "password-login"
+	}
+
+	return ""
+}
+
 // upsertVariantTx inserts or updates a request_variants row and returns its ID.
+// The auto-label is set only on INSERT — manual labels are never overwritten.
 func upsertVariantTx(tx *sql.Tx, endpointID int64, fingerprint, now string) (int64, error) {
+	label := autoVariantLabel(fingerprint)
 	_, err := tx.Exec(`
-		INSERT INTO request_variants (endpoint_id, fingerprint, first_seen, last_seen, call_count)
-		VALUES (?, ?, ?, ?, 1)
+		INSERT INTO request_variants (endpoint_id, fingerprint, label, first_seen, last_seen, call_count)
+		VALUES (?, ?, ?, ?, ?, 1)
 		ON CONFLICT(endpoint_id, fingerprint) DO UPDATE SET
 			last_seen  = excluded.last_seen,
 			call_count = call_count + 1`,
-		endpointID, fingerprint, now, now,
+		endpointID, fingerprint, label, now, now,
 	)
 	if err != nil {
 		return 0, fmt.Errorf("store: upsert variant: %w", err)
@@ -87,6 +125,16 @@ func upsertVariantTx(tx *sql.Tx, endpointID int64, fingerprint, now string) (int
 		return 0, fmt.Errorf("store: select variant id: %w", err)
 	}
 	return id, nil
+}
+
+// UpdateVariantLabel sets a human-readable label on a variant row.
+func (s *Store) UpdateVariantLabel(variantID int64, label string) error {
+	if _, err := s.db.Exec(
+		`UPDATE request_variants SET label = ? WHERE id = ?`, label, variantID,
+	); err != nil {
+		return fmt.Errorf("store: update variant label: %w", err)
+	}
+	return nil
 }
 
 // updateVariantFieldConfidenceTx mirrors updateFieldConfidenceTx but scoped to a variant.

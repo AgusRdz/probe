@@ -31,6 +31,8 @@ func RunAnnotate(args []string, cfg *config.Config) {
 	var tags multiFlag
 	fs.Var(&tags, "tag", "tag to apply (repeatable)")
 	pathOverride := fs.String("path-override", "", "canonical path pattern override")
+	variantLabel := fs.String("variant-label", "", "label to assign to a variant (requires --variant-fingerprint)")
+	variantFingerprint := fs.String("variant-fingerprint", "", "fingerprint of the variant to label (see probe show)")
 	db := fs.String("db", "", "override DB path")
 
 	if err := fs.Parse(args); err != nil {
@@ -84,6 +86,36 @@ func RunAnnotate(args []string, cfg *config.Config) {
 	if found == nil {
 		fmt.Fprintf(os.Stderr, "probe annotate: endpoint not found: %s %s\n", method, path)
 		os.Exit(1)
+	}
+
+	// Handle variant labeling — independent of endpoint annotation.
+	if *variantFingerprint != "" {
+		if *variantLabel == "" {
+			fmt.Fprintln(os.Stderr, "probe annotate: --variant-label is required when --variant-fingerprint is set")
+			os.Exit(1)
+		}
+		variants, err := s.GetVariants(found.ID)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "probe: get variants: %v\n", err)
+			os.Exit(1)
+		}
+		var variantID int64
+		for _, v := range variants {
+			if v.Fingerprint == *variantFingerprint {
+				variantID = v.ID
+				break
+			}
+		}
+		if variantID == 0 {
+			fmt.Fprintf(os.Stderr, "probe annotate: variant not found: %s\n", *variantFingerprint)
+			os.Exit(1)
+		}
+		if err := s.UpdateVariantLabel(variantID, *variantLabel); err != nil {
+			fmt.Fprintf(os.Stderr, "probe: update variant label: %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Printf("probe: labelled variant %s → %q\n", *variantFingerprint, *variantLabel)
+		return
 	}
 
 	// If no flags provided, open $EDITOR with current values.

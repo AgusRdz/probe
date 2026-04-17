@@ -327,3 +327,96 @@ func TestGetVariantFieldConfidence(t *testing.T) {
 		}
 	}
 }
+
+// --- autoVariantLabel ---
+
+func TestAutoVariantLabel(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		fingerprint string
+		wantLabel   string
+	}{
+		{"auth:bearer|body:data", "authenticated"},
+		{"auth:basic|body:", "basic-auth"},
+		{"auth:apikey|body:x", "api-key"},
+		{"auth:none|body:token", "token-login"},
+		{"auth:none|body:password,username", "password-login"},
+		{"auth:none|body:username,password", "password-login"},
+		{"auth:none|body:email,password", "password-login"},
+		{"auth:none|body:something,else", ""},
+		{"auth:none|body:", ""},
+	}
+
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.fingerprint, func(t *testing.T) {
+			t.Parallel()
+			got := autoVariantLabel(tc.fingerprint)
+			if got != tc.wantLabel {
+				t.Errorf("autoVariantLabel(%q) = %q; want %q", tc.fingerprint, got, tc.wantLabel)
+			}
+		})
+	}
+}
+
+// TestUpdateVariantLabel verifies that UpdateVariantLabel persists the label.
+func TestUpdateVariantLabel(t *testing.T) {
+	t.Parallel()
+	s := newTestStore(t)
+
+	pair := observer.CapturedPair{
+		Method:         "POST",
+		RawPath:        "/api/login",
+		ReqContentType: "application/json",
+		StatusCode:     200,
+	}
+	schema := &observer.Schema{
+		Type:       "object",
+		Properties: map[string]*observer.Schema{"token": {Type: "string"}},
+	}
+	if err := s.Record(pair, schema, nil); err != nil {
+		t.Fatalf("Record: %v", err)
+	}
+
+	eps, _ := s.GetEndpoints()
+	variants, _ := s.GetVariants(eps[0].ID)
+	if len(variants) == 0 {
+		t.Fatal("expected at least 1 variant")
+	}
+
+	if err := s.UpdateVariantLabel(variants[0].ID, "sso"); err != nil {
+		t.Fatalf("UpdateVariantLabel: %v", err)
+	}
+
+	variants, _ = s.GetVariants(eps[0].ID)
+	if variants[0].Label != "sso" {
+		t.Errorf("expected label %q; got %q", "sso", variants[0].Label)
+	}
+}
+
+// TestRecordAutoLabelsVariant verifies that auto-labeling fires on insert.
+func TestRecordAutoLabelsVariant(t *testing.T) {
+	t.Parallel()
+	s := newTestStore(t)
+
+	// Bearer auth → "authenticated"
+	pair := observer.CapturedPair{
+		Method:         "GET",
+		RawPath:        "/api/profile",
+		ReqContentType: "application/json",
+		StatusCode:     200,
+		ReqHeaders:     []string{"Authorization:bearer"},
+	}
+	if err := s.Record(pair, nil, nil); err != nil {
+		t.Fatalf("Record: %v", err)
+	}
+
+	eps, _ := s.GetEndpoints()
+	variants, _ := s.GetVariants(eps[0].ID)
+	if len(variants) == 0 {
+		t.Fatal("expected 1 variant")
+	}
+	if variants[0].Label != "authenticated" {
+		t.Errorf("expected auto-label %q; got %q", "authenticated", variants[0].Label)
+	}
+}
