@@ -53,8 +53,22 @@ URL="https://github.com/${REPO}/releases/download/${PROBE_VERSION}/${BINARY}"
 echo "installing probe ${PROBE_VERSION} (${OS}/${ARCH})..."
 
 mkdir -p "$INSTALL_DIR"
-curl -fsSL "$URL" -o "${INSTALL_DIR}/probe${EXT}"
-chmod +x "${INSTALL_DIR}/probe${EXT}"
+
+DEST="${INSTALL_DIR}/probe${EXT}"
+TMP="${DEST}.tmp"
+OLD="${DEST}.old"
+
+curl -fsSL "$URL" -o "$TMP"
+chmod +x "$TMP"
+
+# On Windows (MSYS/Git Bash) a running binary cannot be overwritten — rename it
+# away first, then rename .tmp into place. On Unix, the mv is atomic anyway.
+if [ "$OS" = "windows" ] && [ -f "$DEST" ]; then
+  rm -f "$OLD"
+  mv "$DEST" "$OLD"
+fi
+mv "$TMP" "$DEST"
+rm -f "$OLD"
 
 echo "installed probe to ${INSTALL_DIR}/probe${EXT}"
 echo ""

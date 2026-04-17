@@ -30,9 +30,19 @@ Write-Host "installing probe $($env:PROBE_VERSION) (windows/$Arch)..."
 # Create install dir
 New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
 
-# Download binary
+# Download binary — write to .tmp first, then rename into place.
+# On Windows a running binary cannot be overwritten but can be renamed,
+# so we rename current → .old to free the name, then .tmp → probe.exe.
 $Destination = Join-Path $InstallDir "probe.exe"
-Invoke-WebRequest -Uri $Url -OutFile $Destination
+$TmpPath     = "$Destination.tmp"
+$OldPath     = "$Destination.old"
+
+Invoke-WebRequest -Uri $Url -OutFile $TmpPath
+
+if (Test-Path $OldPath) { Remove-Item $OldPath -Force }
+if (Test-Path $Destination) { Rename-Item $Destination $OldPath }
+Rename-Item $TmpPath $Destination
+if (Test-Path $OldPath) { Remove-Item $OldPath -Force -ErrorAction SilentlyContinue }
 
 Write-Host "installed probe to $Destination"
 Write-Host ""
