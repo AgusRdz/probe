@@ -48,6 +48,16 @@ type OpenAPIOperation struct {
 	RequestBody *OpenAPIRequestBody        `yaml:"requestBody,omitempty" json:"requestBody,omitempty"`
 	Responses   map[string]OpenAPIResponse `yaml:"responses" json:"responses"`
 	Security    []map[string][]string      `yaml:"security,omitempty" json:"security,omitempty"`
+	XVariants   []OpenAPIVariant           `yaml:"x-variants,omitempty" json:"x-variants,omitempty"`
+}
+
+// OpenAPIVariant describes a distinct request shape detected for an operation.
+// Stored as an x-variants extension — compatible with all OpenAPI tooling.
+type OpenAPIVariant struct {
+	Fingerprint string              `yaml:"fingerprint" json:"fingerprint"`
+	Label       string              `yaml:"label,omitempty" json:"label,omitempty"`
+	CallCount   int                 `yaml:"call_count" json:"call_count"`
+	RequestBody *OpenAPIRequestBody `yaml:"requestBody,omitempty" json:"requestBody,omitempty"`
 }
 
 // OpenAPIParameter represents a path or query parameter.
@@ -224,6 +234,36 @@ func GenerateOpenAPI(s StoreReader, opts ExportOptions) (*OpenAPISpec, int, erro
 		if ep.RequiresAuth && !isTokenGenerationPath(ep.PathPattern) {
 			op.Security = []map[string][]string{{"bearerAuth": {}}}
 			hasAuthEndpoint = true
+		}
+
+		// Attach x-variants when multiple distinct request shapes were observed.
+		variants, err := s.GetVariants(ep.ID)
+		if err != nil {
+			return nil, 0, fmt.Errorf("export: get variants for endpoint %d: %w", ep.ID, err)
+		}
+		if len(variants) > 1 {
+			xvs := make([]OpenAPIVariant, 0, len(variants))
+			for _, v := range variants {
+				vFieldRows, err := s.GetVariantFieldConfidence(v.ID)
+				if err != nil {
+					return nil, 0, fmt.Errorf("export: get variant field confidence %d: %w", v.ID, err)
+				}
+				vReqSchema := buildSchemaFromConfidence(vFieldRows, "request", opts.ConfidenceThreshold)
+				var vReqBody *OpenAPIRequestBody
+				if vReqSchema != nil {
+					vReqBody = &OpenAPIRequestBody{
+						Required: true,
+						Content:  map[string]OpenAPIMediaType{"application/json": {Schema: *vReqSchema}},
+					}
+				}
+				xvs = append(xvs, OpenAPIVariant{
+					Fingerprint: v.Fingerprint,
+					Label:       v.Label,
+					CallCount:   v.CallCount,
+					RequestBody: vReqBody,
+				})
+			}
+			op.XVariants = xvs
 		}
 
 		pathItem := paths[ep.PathPattern]

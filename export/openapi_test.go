@@ -312,3 +312,56 @@ func keysOf(m map[string]OpenAPIPathItem) []string {
 	}
 	return keys
 }
+
+// TestGenerateOpenAPI_XVariants verifies that an endpoint with multiple request
+// variants gets an x-variants extension on the operation.
+func TestGenerateOpenAPI_XVariants(t *testing.T) {
+	t.Parallel()
+	s := newTestStore(t)
+
+	// Record two observations with different body shapes → two variants.
+	pairPassword := observer.CapturedPair{
+		Method: "POST", RawPath: "/api/login",
+		ReqContentType: "application/json", StatusCode: 200,
+	}
+	schemaPassword := &observer.Schema{
+		Type: "object",
+		Properties: map[string]*observer.Schema{
+			"username": {Type: "string"},
+			"password": {Type: "string"},
+		},
+	}
+	pairToken := observer.CapturedPair{
+		Method: "POST", RawPath: "/api/login",
+		ReqContentType: "application/json", StatusCode: 200,
+	}
+	schemaToken := &observer.Schema{
+		Type: "object",
+		Properties: map[string]*observer.Schema{
+			"token": {Type: "string"},
+		},
+	}
+
+	if err := s.Record(pairPassword, schemaPassword, nil); err != nil {
+		t.Fatalf("Record password: %v", err)
+	}
+	if err := s.Record(pairToken, schemaToken, nil); err != nil {
+		t.Fatalf("Record token: %v", err)
+	}
+
+	spec, _, err := GenerateOpenAPI(s, defaultOpts())
+	if err != nil {
+		t.Fatalf("GenerateOpenAPI: %v", err)
+	}
+
+	pathItem, ok := spec.Paths["/api/login"]
+	if !ok {
+		t.Fatal("expected /api/login in paths")
+	}
+	if pathItem.Post == nil {
+		t.Fatal("expected POST operation")
+	}
+	if len(pathItem.Post.XVariants) != 2 {
+		t.Errorf("expected 2 x-variants; got %d", len(pathItem.Post.XVariants))
+	}
+}

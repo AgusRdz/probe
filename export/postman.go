@@ -180,6 +180,56 @@ func GeneratePostman(s StoreReader, opts ExportOptions) (*PostmanCollection, err
 			})
 		}
 
+		// When multiple variants exist, emit one item per variant.
+		variants, err := s.GetVariants(ep.ID)
+		if err != nil {
+			return nil, fmt.Errorf("postman: get variants for endpoint %d: %w", ep.ID, err)
+		}
+		if len(variants) > 1 {
+			for i, v := range variants {
+				vFieldRows, err := s.GetVariantFieldConfidence(v.ID)
+				if err != nil {
+					return nil, fmt.Errorf("postman: get variant field confidence %d: %w", v.ID, err)
+				}
+				vReqSchema := buildSchemaFromConfidence(vFieldRows, "request", opts.ConfidenceThreshold)
+				var vBody *PostmanBody
+				vHeaders := make([]PostmanHeader, len(headers))
+				copy(vHeaders, headers)
+				// Remove Content-Type added above for the merged body — will re-add per variant.
+				filteredHeaders := vHeaders[:0]
+				for _, h := range vHeaders {
+					if strings.ToLower(h.Key) != "content-type" {
+						filteredHeaders = append(filteredHeaders, h)
+					}
+				}
+				vHeaders = filteredHeaders
+				if vReqSchema != nil {
+					tmpl := schemaToJSONTemplate(vReqSchema)
+					raw, _ := json.MarshalIndent(tmpl, "", "  ")
+					vHeaders = append(vHeaders, PostmanHeader{Key: "Content-Type", Value: "application/json"})
+					vBody = &PostmanBody{
+						Mode: "raw",
+						Raw:  string(raw),
+						Options: &PostmanBodyOptions{Raw: PostmanBodyRaw{Language: "json"}},
+					}
+				}
+				label := v.Label
+				if label == "" {
+					label = fmt.Sprintf("variant %d", i+1)
+				}
+				items = append(items, PostmanItem{
+					Name: fmt.Sprintf("%s %s (%s)", strings.ToUpper(ep.Method), ep.PathPattern, label),
+					Request: PostmanRequest{
+						Method: strings.ToUpper(ep.Method),
+						Header: vHeaders,
+						URL:    PostmanURL{Raw: url, Host: []string{"{{baseUrl}}"}, Path: buildPathSegments(ep.PathPattern), Variable: variables, Query: queryParams},
+						Body:   vBody,
+					},
+				})
+			}
+			continue
+		}
+
 		items = append(items, PostmanItem{
 			Name: fmt.Sprintf("%s %s", strings.ToUpper(ep.Method), ep.PathPattern),
 			Request: PostmanRequest{

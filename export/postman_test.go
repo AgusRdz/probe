@@ -186,3 +186,60 @@ func TestWritePostman(t *testing.T) {
 		t.Errorf("info.name: got %q, want %q", name, "Test Collection")
 	}
 }
+
+// TestGeneratePostman_MultipleVariants verifies that an endpoint with two variants
+// produces two separate Postman items (one per variant).
+func TestGeneratePostman_MultipleVariants(t *testing.T) {
+	t.Parallel()
+	s := newTestStore(t)
+
+	pairPassword := observer.CapturedPair{
+		Method: "POST", RawPath: "/api/login",
+		ReqContentType: "application/json", StatusCode: 200,
+	}
+	schemaPassword := &observer.Schema{
+		Type: "object",
+		Properties: map[string]*observer.Schema{
+			"username": {Type: "string"},
+			"password": {Type: "string"},
+		},
+	}
+	pairToken := observer.CapturedPair{
+		Method: "POST", RawPath: "/api/login",
+		ReqContentType: "application/json", StatusCode: 200,
+	}
+	schemaToken := &observer.Schema{
+		Type: "object",
+		Properties: map[string]*observer.Schema{
+			"token": {Type: "string"},
+		},
+	}
+
+	if err := s.Record(pairPassword, schemaPassword, nil); err != nil {
+		t.Fatalf("Record password: %v", err)
+	}
+	if err := s.Record(pairToken, schemaToken, nil); err != nil {
+		t.Fatalf("Record token: %v", err)
+	}
+
+	col, err := GeneratePostman(s, defaultOpts())
+	if err != nil {
+		t.Fatalf("GeneratePostman: %v", err)
+	}
+
+	if len(col.Item) != 2 {
+		t.Fatalf("expected 2 Postman items (one per variant); got %d", len(col.Item))
+	}
+
+	// Both items should be POST /api/login but with different names.
+	names := map[string]bool{}
+	for _, item := range col.Item {
+		names[item.Name] = true
+		if item.Request.Method != "POST" {
+			t.Errorf("expected POST; got %s", item.Request.Method)
+		}
+	}
+	if len(names) != 2 {
+		t.Errorf("expected 2 distinct item names; got %v", names)
+	}
+}
