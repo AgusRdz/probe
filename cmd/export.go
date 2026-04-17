@@ -20,11 +20,9 @@ func RunExport(args []string, cfg *config.Config) {
 		fs.PrintDefaults()
 	}
 
-	format := fs.String("format", cfg.Export.DefaultFormat, `output format: "openapi" (default) or "postman"`)
+	format := fs.String("format", cfg.Export.DefaultFormat, `output format: "openapi" (YAML, default), "json" (OpenAPI as JSON), "postman"`)
 	out := fs.String("out", "", "output file path (default: stdout)")
-	minConfidence := fs.Float64("min-confidence", cfg.Export.MinConfidence, "minimum confidence threshold (0.0–1.0)")
-	includeSkeleton := fs.Bool("include-skeleton", cfg.Export.IncludeSkeleton, "include scan-only endpoints with 0 calls")
-	includeUnconfirmed := fs.Bool("include-unconfirmed", false, "include endpoints with unconfirmed path patterns")
+	minCalls := fs.Int("min-calls", cfg.Export.MinCalls, "only export endpoints with at least N traffic calls (0 = include scan-only endpoints too)")
 	db := fs.String("db", "", "override DB path")
 
 	if err := fs.Parse(args); err != nil {
@@ -39,12 +37,10 @@ func RunExport(args []string, cfg *config.Config) {
 	defer s.Close() //nolint:errcheck
 
 	opts := export.ExportOptions{
-		Format:             *format,
-		MinConfidence:      *minConfidence,
-		IncludeSkeleton:    *includeSkeleton,
-		IncludeUnconfirmed: *includeUnconfirmed,
-		InfoTitle:          cfg.Export.InfoTitle,
-		InfoVersion:        cfg.Export.InfoVersion,
+		Format:    *format,
+		MinCalls:  *minCalls,
+		InfoTitle: cfg.Export.InfoTitle,
+		InfoVersion: cfg.Export.InfoVersion,
 	}
 
 	w := os.Stdout
@@ -68,17 +64,32 @@ func RunExport(args []string, cfg *config.Config) {
 			fmt.Fprintf(os.Stderr, "probe: write postman: %v\n", err)
 			os.Exit(1)
 		}
+		fmt.Fprintf(os.Stderr, "\nExported %d endpoints to Postman collection.\n\n", len(col.Item))
 		return
 	}
 
-	spec, err := export.GenerateOpenAPI(s, opts)
+	spec, count, err := export.GenerateOpenAPI(s, opts)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "probe: generate openapi: %v\n", err)
 		os.Exit(1)
 	}
 
-	if err := export.WriteYAML(w, spec); err != nil {
-		fmt.Fprintf(os.Stderr, "probe: write yaml: %v\n", err)
-		os.Exit(1)
+	if *format == "json" {
+		if err := export.WriteJSON(w, spec); err != nil {
+			fmt.Fprintf(os.Stderr, "probe: write json: %v\n", err)
+			os.Exit(1)
+		}
+	} else {
+		if err := export.WriteYAML(w, spec); err != nil {
+			fmt.Fprintf(os.Stderr, "probe: write yaml: %v\n", err)
+			os.Exit(1)
+		}
 	}
+
+	fmt.Fprintf(os.Stderr, "\nExported %d endpoints", count)
+	if *out != "" {
+		fmt.Fprintf(os.Stderr, " → %s", *out)
+	}
+	fmt.Fprintln(os.Stderr)
+	fmt.Fprintln(os.Stderr)
 }

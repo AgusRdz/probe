@@ -25,8 +25,7 @@ func newTestStore(t *testing.T) *store.Store {
 
 func defaultOpts() ExportOptions {
 	return ExportOptions{
-		IncludeSkeleton:     true,
-		IncludeUnconfirmed:  true,
+		MinCalls:            0,
 		ConfidenceThreshold: 0.9,
 		InfoTitle:           "Test API",
 		InfoVersion:         "1.0.0",
@@ -39,7 +38,7 @@ func TestGenerateOpenAPI_Empty(t *testing.T) {
 	t.Parallel()
 	s := newTestStore(t)
 
-	spec, err := GenerateOpenAPI(s, defaultOpts())
+	spec, _, err := GenerateOpenAPI(s, defaultOpts())
 	if err != nil {
 		t.Fatalf("GenerateOpenAPI: %v", err)
 	}
@@ -110,7 +109,7 @@ func TestGenerateOpenAPI_SingleEndpoint(t *testing.T) {
 	opts := defaultOpts()
 	opts.ConfidenceThreshold = 0.9 // name/email seen 2/2=1.0 → required; age 1/2=0.5 → optional
 
-	spec, err := GenerateOpenAPI(s, opts)
+	spec, _, err := GenerateOpenAPI(s, opts)
 	if err != nil {
 		t.Fatalf("GenerateOpenAPI: %v", err)
 	}
@@ -175,7 +174,7 @@ func TestWriteYAML(t *testing.T) {
 		t.Fatalf("UpsertEndpoint: %v", err)
 	}
 
-	spec, err := GenerateOpenAPI(s, defaultOpts())
+	spec, _, err := GenerateOpenAPI(s, defaultOpts())
 	if err != nil {
 		t.Fatalf("GenerateOpenAPI: %v", err)
 	}
@@ -204,7 +203,7 @@ func TestWriteJSON(t *testing.T) {
 		t.Fatalf("UpsertEndpoint: %v", err)
 	}
 
-	spec, err := GenerateOpenAPI(s, defaultOpts())
+	spec, _, err := GenerateOpenAPI(s, defaultOpts())
 	if err != nil {
 		t.Fatalf("GenerateOpenAPI: %v", err)
 	}

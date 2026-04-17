@@ -95,10 +95,7 @@ func GeneratePostman(s StoreReader, opts ExportOptions) (*PostmanCollection, err
 		if ep.Protocol == "grpc" {
 			continue
 		}
-		if !opts.IncludeSkeleton && ep.CallCount == 0 {
-			continue
-		}
-		if !opts.IncludeUnconfirmed && strings.HasSuffix(ep.PathPattern, "?") {
+		if ep.CallCount < opts.MinCalls {
 			continue
 		}
 

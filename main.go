@@ -102,10 +102,9 @@ func printHelp() {
 
 	b.WriteString(section("Export"))
 	b.WriteString(row("export", "Export as OpenAPI 3.x YAML"))
-	b.WriteString(row("  "+flag("--format openapi"), "Output format (default: openapi)"))
+	b.WriteString(row("  "+flag("--format <fmt>"), "Output format: openapi (YAML), json (OpenAPI JSON), postman"))
 	b.WriteString(row("  "+flag("--out <file>"), "Write to file instead of stdout"))
-	b.WriteString(row("  "+flag("--min-confidence <f>"), "Minimum confidence threshold"))
-	b.WriteString(row("  "+flag("--include-skeleton"), "Include scan-only endpoints"))
+	b.WriteString(row("  "+flag("--min-calls <n>"), "Only export endpoints with N+ calls (0 = include scan-only)"))
 	b.WriteString("\n")
 
 	b.WriteString(section("Annotation"))

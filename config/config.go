@@ -35,7 +35,8 @@ type InferenceConfig struct {
 type ExportConfig struct {
 	DefaultFormat   string  `yaml:"default_format"`
 	MinConfidence   float64 `yaml:"min_confidence"`
-	IncludeSkeleton bool    `yaml:"include_skeleton"`
+	IncludeSkeleton bool    `yaml:"include_skeleton"` // kept for YAML compat; use MinCalls instead
+	MinCalls        int     `yaml:"min_calls"`        // 0 = include all; 1 = observed only
 	OpenAPIVersion  string  `yaml:"openapi_version"`
 	InfoTitle       string  `yaml:"info_title"`
 	InfoVersion     string  `yaml:"info_version"`
@@ -100,7 +101,8 @@ func Default() *Config {
 		Export: ExportConfig{
 			DefaultFormat:   "openapi",
 			MinConfidence:   0.0,
-			IncludeSkeleton: false,
+			IncludeSkeleton: true,
+			MinCalls:        0,
 			OpenAPIVersion:  "3.0.3",
 			InfoTitle:       "Discovered API",
 			InfoVersion:     "0.0.1",
@@ -248,6 +250,9 @@ func merge(base, override *Config) {
 	}
 	if override.Export.InfoVersion != "" {
 		base.Export.InfoVersion = override.Export.InfoVersion
+	}
+	if override.Export.MinCalls != 0 {
+		base.Export.MinCalls = override.Export.MinCalls
 	}
 
 	// Output

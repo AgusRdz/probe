@@ -90,11 +90,9 @@ type OpenAPISchema struct {
 
 // ExportOptions controls what gets included in the export.
 type ExportOptions struct {
-	Format              string  // "openapi" | "postman" (postman is Phase 4)
-	MinConfidence       float64 // 0.0 = include all
-	IncludeSkeleton     bool    // include scan-only (0 calls) endpoints
-	IncludeUnconfirmed  bool    // include endpoints with ? in path pattern
-	ConfidenceThreshold float64 // for required vs optional (default 0.9)
+	Format              string  // "openapi" | "postman"
+	MinCalls            int     // 0 = include all (scan + observed); 1 = observed only
+	ConfidenceThreshold float64 // required vs optional field threshold (default 0.9)
 	InfoTitle           string
 	InfoVersion         string
 }
@@ -111,7 +109,8 @@ type StoreReader interface {
 }
 
 // GenerateOpenAPI queries the store and builds an OpenAPISpec.
-func GenerateOpenAPI(s StoreReader, opts ExportOptions) (*OpenAPISpec, error) {
+// Returns the spec, the count of exported endpoints, and any error.
+func GenerateOpenAPI(s StoreReader, opts ExportOptions) (*OpenAPISpec, int, error) {
 	if opts.ConfidenceThreshold == 0 {
 		opts.ConfidenceThreshold = 0.9
 	}
@@ -124,22 +123,18 @@ func GenerateOpenAPI(s StoreReader, opts ExportOptions) (*OpenAPISpec, error) {
 
 	endpoints, err := s.GetEndpoints()
 	if err != nil {
-		return nil, fmt.Errorf("export: get endpoints: %w", err)
+		return nil, 0, fmt.Errorf("export: get endpoints: %w", err)
 	}
 
 	paths := make(map[string]OpenAPIPathItem)
+	count := 0
 
 	for _, ep := range endpoints {
 		// Always skip gRPC — no schema support in Phase 1.
 		if ep.Protocol == "grpc" {
 			continue
 		}
-		// Skip scan-only endpoints unless IncludeSkeleton is set.
-		if !opts.IncludeSkeleton && ep.CallCount == 0 {
-			continue
-		}
-		// Skip unconfirmed path patterns (those ending with ?) unless opted in.
-		if !opts.IncludeUnconfirmed && strings.HasSuffix(ep.PathPattern, "?") {
+		if ep.CallCount < opts.MinCalls {
 			continue
 		}
 
@@ -149,7 +144,7 @@ func GenerateOpenAPI(s StoreReader, opts ExportOptions) (*OpenAPISpec, error) {
 		// Get field confidence for request body construction.
 		fieldRows, err := s.GetFieldConfidence(ep.ID)
 		if err != nil {
-			return nil, fmt.Errorf("export: get field confidence for endpoint %d: %w", ep.ID, err)
+			return nil, 0, fmt.Errorf("export: get field confidence for endpoint %d: %w", ep.ID, err)
 		}
 
 		var reqBody *OpenAPIRequestBody
@@ -163,19 +158,25 @@ func GenerateOpenAPI(s StoreReader, opts ExportOptions) (*OpenAPISpec, error) {
 			}
 		}
 
+		respSchema := buildSchemaFromConfidence(fieldRows, "response", opts.ConfidenceThreshold)
+
 		// Collect unique status codes from observations.
 		observations, err := s.GetObservations(ep.ID, 100)
 		if err != nil {
-			return nil, fmt.Errorf("export: get observations for endpoint %d: %w", ep.ID, err)
+			return nil, 0, fmt.Errorf("export: get observations for endpoint %d: %w", ep.ID, err)
 		}
 
-		responses := buildResponses(observations)
+		responses := buildResponses(observations, respSchema)
 
 		// Ensure there is always at least a default response entry.
 		if len(responses) == 0 {
-			responses = map[string]OpenAPIResponse{
-				"200": {Description: statusDescription(200)},
+			resp := OpenAPIResponse{Description: statusDescription(200)}
+			if respSchema != nil {
+				resp.Content = map[string]OpenAPIMediaType{
+					"application/json": {Schema: *respSchema},
+				}
 			}
+			responses = map[string]OpenAPIResponse{"200": resp}
 		}
 
 		op := &OpenAPIOperation{
@@ -190,6 +191,7 @@ func GenerateOpenAPI(s StoreReader, opts ExportOptions) (*OpenAPISpec, error) {
 		pathItem := paths[ep.PathPattern]
 		setOperation(&pathItem, ep.Method, op)
 		paths[ep.PathPattern] = pathItem
+		count++
 	}
 
 	spec := &OpenAPISpec{
@@ -201,7 +203,7 @@ func GenerateOpenAPI(s StoreReader, opts ExportOptions) (*OpenAPISpec, error) {
 		Paths: paths,
 	}
 
-	return spec, nil
+	return spec, count, nil
 }
 
 // WriteYAML writes the spec as YAML to w.
@@ -245,7 +247,8 @@ func extractPathParams(pathPattern string) []OpenAPIParameter {
 
 // buildResponses collects unique status codes from observations and maps each
 // to an OpenAPIResponse with an appropriate description.
-func buildResponses(observations []store.Observation) map[string]OpenAPIResponse {
+// respSchema is attached to all 2xx responses when non-nil.
+func buildResponses(observations []store.Observation, respSchema *OpenAPISchema) map[string]OpenAPIResponse {
 	seen := make(map[int]struct{})
 	for _, o := range observations {
 		seen[o.StatusCode] = struct{}{}
@@ -257,7 +260,13 @@ func buildResponses(observations []store.Observation) map[string]OpenAPIResponse
 	responses := make(map[string]OpenAPIResponse, len(seen))
 	for code := range seen {
 		key := fmt.Sprintf("%d", code)
-		responses[key] = OpenAPIResponse{Description: statusDescription(code)}
+		resp := OpenAPIResponse{Description: statusDescription(code)}
+		if respSchema != nil && code >= 200 && code < 300 {
+			resp.Content = map[string]OpenAPIMediaType{
+				"application/json": {Schema: *respSchema},
+			}
+		}
+		responses[key] = resp
 	}
 	return responses
 }
