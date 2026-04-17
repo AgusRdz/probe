@@ -136,6 +136,10 @@ func detectFromPackageJSON(path string) []string {
 		{`"hono"`, "hono"},
 		{`"@trpc/server"`, "trpc"},
 		{`"koa"`, "koa"},
+		{`"nuxt"`, "nuxt"},
+		{`"nuxi"`, "nuxt"},
+		{`"@hapi/hapi"`, "hapi"},
+		{`"hapi"`, "hapi"},
 	}
 	for _, c := range checks {
 		if strings.Contains(content, c.needle) {
@@ -277,6 +281,12 @@ func detectFromComposerJSON(path string) []string {
 	}
 	if strings.Contains(content, "symfony/framework-bundle") {
 		found = append(found, "symfony")
+	}
+	if strings.Contains(content, "codeigniter4/framework") || strings.Contains(content, "codeigniter/framework") {
+		found = append(found, "codeigniter")
+	}
+	if strings.Contains(content, "laminas/laminas-mvc") || strings.Contains(content, "zendframework/zend-mvc") || strings.Contains(content, "laminas/laminas-router") {
+		found = append(found, "zend")
 	}
 	return found
 }

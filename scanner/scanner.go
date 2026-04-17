@@ -23,8 +23,12 @@ func init() {
 	registry = []Extractor{
 		// JavaScript / TypeScript
 		&expressExtractor{},
+		&fastifyExtractor{},
+		&koaExtractor{},
 		&nestjsExtractor{},
 		&nextjsExtractor{},
+		&nuxtExtractor{},
+		&hapiExtractor{},
 		// Python
 		&fastAPIExtractor{},
 		&flaskExtractor{},
@@ -42,8 +46,12 @@ func init() {
 		&springExtractor{},
 		// Ruby
 		&railsExtractor{},
+		&sinatraExtractor{},
 		// PHP
 		&laravelExtractor{},
+		&symfonyExtractor{},
+		&codeigniterExtractor{},
+		&zendExtractor{},
 		// Rust
 		&actixExtractor{},
 		&axumExtractor{},
