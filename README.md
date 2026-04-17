@@ -89,12 +89,12 @@ Seven formats supported. Use shorthand flags for the simplest experience — the
 | `--postman` | Postman Collection v2.1 | `<dir>.postman_collection.json` | Body, headers, query params |
 | `--curl` | curl shell script | `<dir>.sh` | One `curl` command per endpoint (CLI only) |
 | `--httpie` | HTTPie shell script | `<dir>.httpie.sh` | One `http` command per endpoint (CLI only, not HTTPie Desktop) |
-| `--bruno` | Bruno collection | `<dir>-bruno/` | Directory of `.bru` files |
+| `--bruno` | Bruno collection | `<dir>-bruno/` | Directory of `.bru` files — use **Open Collection** in Bruno, not Import |
 
 ```sh
 # Shorthand — file named from your project directory automatically
 probe export --postman          # → my-api.postman_collection.json
-probe export --bruno            # → my-api-bruno/
+probe export --bruno            # → my-api-bruno/  (open with "Open Collection" in Bruno, not "Import")
 
 # Override the path
 probe export --postman --out ./exports/collection.json
