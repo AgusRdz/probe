@@ -241,3 +241,90 @@ func TestStats(t *testing.T) {
 		t.Errorf("observed = %d; want 2", got)
 	}
 }
+
+func TestRecordCapturesHeaders(t *testing.T) {
+	t.Parallel()
+	s := newTestStore(t)
+
+	pair := observer.CapturedPair{
+		Method:     "GET",
+		RawPath:    "/api/users",
+		StatusCode: 200,
+		ReqHeaders: []string{"Authorization", "Accept"},
+	}
+
+	if err := s.Record(pair, nil, nil); err != nil {
+		t.Fatalf("Record: %v", err)
+	}
+
+	endpoints, err := s.GetEndpoints()
+	if err != nil {
+		t.Fatalf("GetEndpoints: %v", err)
+	}
+	if len(endpoints) != 1 {
+		t.Fatalf("expected 1 endpoint; got %d", len(endpoints))
+	}
+
+	headers, err := s.GetEndpointHeaders(endpoints[0].ID)
+	if err != nil {
+		t.Fatalf("GetEndpointHeaders: %v", err)
+	}
+
+	headerMap := map[string]HeaderRow{}
+	for _, h := range headers {
+		headerMap[h.HeaderName] = h
+	}
+
+	for _, want := range []string{"Authorization", "Accept"} {
+		h, ok := headerMap[want]
+		if !ok {
+			t.Errorf("expected header %q in result", want)
+			continue
+		}
+		if h.SeenCount != 1 {
+			t.Errorf("header %q seen_count: want 1, got %d", want, h.SeenCount)
+		}
+		if h.TotalCalls != 1 {
+			t.Errorf("header %q total_calls: want 1, got %d", want, h.TotalCalls)
+		}
+	}
+}
+
+func TestRecordCapturesQueryParams(t *testing.T) {
+	t.Parallel()
+	s := newTestStore(t)
+
+	pair := observer.CapturedPair{
+		Method:     "GET",
+		RawPath:    "/api/users?page=1&limit=10",
+		StatusCode: 200,
+	}
+
+	if err := s.Record(pair, nil, nil); err != nil {
+		t.Fatalf("Record: %v", err)
+	}
+
+	endpoints, err := s.GetEndpoints()
+	if err != nil {
+		t.Fatalf("GetEndpoints: %v", err)
+	}
+	if len(endpoints) != 1 {
+		t.Fatalf("expected 1 endpoint; got %d", len(endpoints))
+	}
+
+	params, err := s.GetQueryParams(endpoints[0].ID)
+	if err != nil {
+		t.Fatalf("GetQueryParams: %v", err)
+	}
+
+	paramMap := map[string]QueryParamRow{}
+	for _, p := range params {
+		paramMap[p.ParamName] = p
+	}
+
+	for _, want := range []string{"page", "limit"} {
+		if _, ok := paramMap[want]; !ok {
+			t.Errorf("expected query param %q in result", want)
+		}
+	}
+}

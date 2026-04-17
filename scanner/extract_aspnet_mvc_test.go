@@ -168,6 +168,69 @@ public class AccountController : APBaseApiController
 	}
 }
 
+// TestASPNetMVCAuthDetection verifies that [Authorize] and [AllowAnonymous]
+// attributes are correctly reflected in the RequiresAuth field.
+func TestASPNetMVCAuthDetection(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "App.csproj"), []byte("<Project/>"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	src := `using Microsoft.AspNetCore.Mvc;
+
+namespace MyApp.Controllers;
+
+[ApiController]
+[Authorize]
+[Route("api/auth")]
+public class AuthController : ControllerBase
+{
+    [AllowAnonymous]
+    [HttpPost("login")]
+    public ActionResult Login([FromBody] LoginRequest request)
+    {
+        return Ok();
+    }
+
+    [HttpGet("profile")]
+    public ActionResult<UserProfile> GetProfile()
+    {
+        return Ok();
+    }
+}
+`
+	if err := os.WriteFile(filepath.Join(dir, "AuthController.cs"), []byte(src), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	ex := &aspnetMVCExtractor{}
+	endpoints, err := ex.Extract(dir, &config.ScanConfig{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	byPath := map[string]ScannedEndpoint{}
+	for _, ep := range endpoints {
+		byPath[ep.Method+":"+ep.PathPattern] = ep
+	}
+
+	login, ok := byPath["POST:api/auth/login"]
+	if !ok {
+		t.Fatalf("missing POST:api/auth/login; got %v", byPath)
+	}
+	if login.RequiresAuth {
+		t.Errorf("POST:api/auth/login should have RequiresAuth=false (AllowAnonymous)")
+	}
+
+	profile, ok := byPath["GET:api/auth/profile"]
+	if !ok {
+		t.Fatalf("missing GET:api/auth/profile; got %v", byPath)
+	}
+	if !profile.RequiresAuth {
+		t.Errorf("GET:api/auth/profile should have RequiresAuth=true (inherits class [Authorize])")
+	}
+}
+
 func TestASPNetMVCCSTypeToSchema(t *testing.T) {
 	tests := []struct {
 		csType string

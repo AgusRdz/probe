@@ -69,6 +69,9 @@ func PrintDetail(
 	if ep.Deprecated {
 		label("Deprecated", colorize("yes", colorYellowStr, opts.NoColor))
 	}
+	if ep.RequiresAuth {
+		label("Auth", colorize("required", colorYellowStr, opts.NoColor))
+	}
 	if ep.Description != "" {
 		label("Description", ep.Description)
 	}

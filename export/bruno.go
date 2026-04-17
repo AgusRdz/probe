@@ -70,6 +70,8 @@ func GenerateBruno(s StoreReader, opts ExportOptions) (BrunoCollection, error) {
 			return ":" + name
 		})
 
+		needsAuth := ep.RequiresAuth && !isTokenGenerationPath(ep.PathPattern)
+
 		var buf bytes.Buffer
 		fmt.Fprintf(&buf, "meta {\n")
 		fmt.Fprintf(&buf, "  name: %s %s\n", method, ep.PathPattern)
@@ -77,12 +79,22 @@ func GenerateBruno(s StoreReader, opts ExportOptions) (BrunoCollection, error) {
 		fmt.Fprintf(&buf, "  seq: %d\n", seq)
 		fmt.Fprintf(&buf, "}\n\n")
 
+		if needsAuth {
+			fmt.Fprintf(&buf, "auth:bearer {\n")
+			fmt.Fprintf(&buf, "  token: {{token}}\n")
+			fmt.Fprintf(&buf, "}\n\n")
+		}
+
 		methodLower := strings.ToLower(method)
+		authValue := "none"
+		if needsAuth {
+			authValue = "bearer"
+		}
 		if hasBody {
 			fmt.Fprintf(&buf, "%s {\n", methodLower)
 			fmt.Fprintf(&buf, "  url: {{baseUrl}}%s\n", brunoURL)
 			fmt.Fprintf(&buf, "  body: json\n")
-			fmt.Fprintf(&buf, "  auth: none\n")
+			fmt.Fprintf(&buf, "  auth: %s\n", authValue)
 			fmt.Fprintf(&buf, "}\n\n")
 
 			template := schemaToJSONTemplate(reqSchema)
@@ -94,7 +106,7 @@ func GenerateBruno(s StoreReader, opts ExportOptions) (BrunoCollection, error) {
 			fmt.Fprintf(&buf, "%s {\n", methodLower)
 			fmt.Fprintf(&buf, "  url: {{baseUrl}}%s\n", brunoURL)
 			fmt.Fprintf(&buf, "  body: none\n")
-			fmt.Fprintf(&buf, "  auth: none\n")
+			fmt.Fprintf(&buf, "  auth: %s\n", authValue)
 			fmt.Fprintf(&buf, "}\n")
 		}
 

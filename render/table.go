@@ -23,6 +23,7 @@ const (
 	ColProtocol  = "protocol"
 	ColStatus    = "status"
 	ColFramework = "framework"
+	ColAuth      = "auth"
 )
 
 // DefaultColumns is the column list used when none is configured.
@@ -76,6 +77,8 @@ func PrintTable(w io.Writer, endpoints []store.Endpoint, statusCodes map[int64][
 			return "STATUS CODES"
 		case ColFramework:
 			return "FRAMEWORK"
+		case ColAuth:
+			return "AUTH"
 		default:
 			return strings.ToUpper(col)
 		}
@@ -92,6 +95,7 @@ func PrintTable(w io.Writer, endpoints []store.Endpoint, statusCodes map[int64][
 		protocol  string
 		status    string
 		framework string
+		auth      string
 		note      string
 		confVal   float64
 	}
@@ -133,6 +137,11 @@ func PrintTable(w io.Writer, endpoints []store.Endpoint, statusCodes map[int64][
 			}
 		}
 
+		authVal := "-"
+		if ep.RequiresAuth {
+			authVal = "yes"
+		}
+
 		r := rowData{
 			method:    ep.Method,
 			path:      ep.PathPattern,
@@ -143,6 +152,7 @@ func PrintTable(w io.Writer, endpoints []store.Endpoint, statusCodes map[int64][
 			protocol:  ep.Protocol,
 			status:    sc,
 			framework: ep.Framework,
+			auth:      authVal,
 			note:      note,
 			confVal:   conf,
 		}
@@ -169,6 +179,8 @@ func PrintTable(w io.Writer, endpoints []store.Endpoint, statusCodes map[int64][
 				return len(r.status)
 			case ColFramework:
 				return len(r.framework)
+			case ColAuth:
+				return len(r.auth)
 			default:
 				return 0
 			}
@@ -217,6 +229,16 @@ func PrintTable(w io.Writer, endpoints []store.Endpoint, statusCodes map[int64][
 				// Color with ANSI, pad based on plain width.
 				colored := confidenceBarColored(r.confVal, opts.NoColor)
 				padding := strings.Repeat(" ", w-len(r.conf))
+				lbuf.WriteString(colored + padding)
+			case ColAuth:
+				// Color with ANSI, pad based on plain width.
+				var colored string
+				if r.auth == "yes" {
+					colored = colorize("yes", colorYellowStr, opts.NoColor)
+				} else {
+					colored = colorize("-", colorDimStr, opts.NoColor)
+				}
+				padding := strings.Repeat(" ", w-len(r.auth))
 				lbuf.WriteString(colored + padding)
 			default:
 				var plain string

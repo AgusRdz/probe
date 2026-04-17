@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/AgusRdz/probe/observer"
+	"github.com/AgusRdz/probe/store"
 )
 
 // TestGeneratePostman_Empty verifies that an empty store produces a collection
@@ -83,6 +84,75 @@ func TestGeneratePostman_SingleEndpoint(t *testing.T) {
 	}
 	if !strings.Contains(item.Request.URL.Raw, "/api/users") {
 		t.Errorf("URL raw: got %q, want to contain /api/users", item.Request.URL.Raw)
+	}
+}
+
+// TestGeneratePostman_AuthHeader verifies that an endpoint with RequiresAuth=true
+// gets "Authorization: Bearer {{token}}" in its Postman request headers.
+func TestGeneratePostman_AuthHeader(t *testing.T) {
+	t.Parallel()
+	s := newTestStore(t)
+
+	_, err := s.UpsertScannedEndpoint(store.ScannedEndpointInput{
+		Method:       "GET",
+		PathPattern:  "api/users",
+		Protocol:     "rest",
+		RequiresAuth: true,
+	})
+	if err != nil {
+		t.Fatalf("UpsertScannedEndpoint: %v", err)
+	}
+
+	col, err := GeneratePostman(s, defaultOpts())
+	if err != nil {
+		t.Fatalf("GeneratePostman: %v", err)
+	}
+	if len(col.Item) != 1 {
+		t.Fatalf("expected 1 item, got %d", len(col.Item))
+	}
+
+	headers := col.Item[0].Request.Header
+	var found bool
+	for _, h := range headers {
+		if strings.ToLower(h.Key) == "authorization" && h.Value == "Bearer {{token}}" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected Authorization: Bearer {{token}} header; got %+v", headers)
+	}
+}
+
+// TestGeneratePostman_NoAuthForLoginPath verifies that a RequiresAuth=true endpoint
+// whose path ends in "login" does NOT get an Authorization header injected.
+func TestGeneratePostman_NoAuthForLoginPath(t *testing.T) {
+	t.Parallel()
+	s := newTestStore(t)
+
+	_, err := s.UpsertScannedEndpoint(store.ScannedEndpointInput{
+		Method:       "POST",
+		PathPattern:  "api/auth/login",
+		Protocol:     "rest",
+		RequiresAuth: true,
+	})
+	if err != nil {
+		t.Fatalf("UpsertScannedEndpoint: %v", err)
+	}
+
+	col, err := GeneratePostman(s, defaultOpts())
+	if err != nil {
+		t.Fatalf("GeneratePostman: %v", err)
+	}
+	if len(col.Item) != 1 {
+		t.Fatalf("expected 1 item, got %d", len(col.Item))
+	}
+
+	headers := col.Item[0].Request.Header
+	for _, h := range headers {
+		if strings.ToLower(h.Key) == "authorization" {
+			t.Errorf("expected no Authorization header for login path; got %+v", h)
+		}
 	}
 }
 

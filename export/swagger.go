@@ -11,12 +11,20 @@ import (
 
 // SwaggerSpec is the top-level Swagger 2.0 document.
 type SwaggerSpec struct {
-	Swagger  string                     `yaml:"swagger"`
-	Info     OpenAPIInfo                `yaml:"info"`
-	Host     string                     `yaml:"host"`
-	BasePath string                     `yaml:"basePath"`
-	Schemes  []string                   `yaml:"schemes"`
-	Paths    map[string]SwaggerPathItem `yaml:"paths"`
+	Swagger             string                     `yaml:"swagger"`
+	Info                OpenAPIInfo                `yaml:"info"`
+	Host                string                     `yaml:"host"`
+	BasePath            string                     `yaml:"basePath"`
+	Schemes             []string                   `yaml:"schemes"`
+	SecurityDefinitions map[string]SwaggerSecurityDef `yaml:"securityDefinitions,omitempty"`
+	Paths               map[string]SwaggerPathItem `yaml:"paths"`
+}
+
+// SwaggerSecurityDef describes an authentication mechanism in Swagger 2.0.
+type SwaggerSecurityDef struct {
+	Type string `yaml:"type"`
+	In   string `yaml:"in,omitempty"`
+	Name string `yaml:"name,omitempty"`
 }
 
 // SwaggerPathItem groups all operations for a single path.
@@ -40,6 +48,7 @@ type SwaggerOperation struct {
 	Produces    []string                   `yaml:"produces,omitempty"`
 	Parameters  []SwaggerParameter         `yaml:"parameters,omitempty"`
 	Responses   map[string]SwaggerResponse `yaml:"responses"`
+	Security    []map[string][]string      `yaml:"security,omitempty"`
 }
 
 // SwaggerParameter represents a path, body, or query parameter.
@@ -75,6 +84,7 @@ func GenerateSwagger(s StoreReader, opts ExportOptions) (*SwaggerSpec, error) {
 	}
 
 	paths := make(map[string]SwaggerPathItem)
+	hasAuthEndpoint := false
 
 	for _, ep := range endpoints {
 		if ep.Protocol == "grpc" {
@@ -152,6 +162,11 @@ func GenerateSwagger(s StoreReader, opts ExportOptions) (*SwaggerSpec, error) {
 			Responses:   responses,
 		}
 
+		if ep.RequiresAuth && !isTokenGenerationPath(ep.PathPattern) {
+			op.Security = []map[string][]string{{"bearerAuth": {}}}
+			hasAuthEndpoint = true
+		}
+
 		pathItem := paths[ep.PathPattern]
 		setSwaggerOperation(&pathItem, method, op)
 		paths[ep.PathPattern] = pathItem
@@ -167,6 +182,15 @@ func GenerateSwagger(s StoreReader, opts ExportOptions) (*SwaggerSpec, error) {
 		BasePath: "/",
 		Schemes:  []string{"http"},
 		Paths:    paths,
+	}
+	if hasAuthEndpoint {
+		spec.SecurityDefinitions = map[string]SwaggerSecurityDef{
+			"bearerAuth": {
+				Type: "apiKey",
+				In:   "header",
+				Name: "Authorization",
+			},
+		}
 	}
 
 	return spec, nil

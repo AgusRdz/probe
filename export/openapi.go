@@ -15,9 +15,10 @@ import (
 
 // OpenAPISpec is the top-level OpenAPI 3.0.3 document.
 type OpenAPISpec struct {
-	OpenAPI string                     `yaml:"openapi" json:"openapi"`
-	Info    OpenAPIInfo                `yaml:"info" json:"info"`
-	Paths   map[string]OpenAPIPathItem `yaml:"paths" json:"paths"`
+	OpenAPI    string                     `yaml:"openapi" json:"openapi"`
+	Info       OpenAPIInfo                `yaml:"info" json:"info"`
+	Components *OpenAPIComponents         `yaml:"components,omitempty" json:"components,omitempty"`
+	Paths      map[string]OpenAPIPathItem `yaml:"paths" json:"paths"`
 }
 
 // OpenAPIInfo holds the spec title and version.
@@ -46,6 +47,7 @@ type OpenAPIOperation struct {
 	Parameters  []OpenAPIParameter         `yaml:"parameters,omitempty" json:"parameters,omitempty"`
 	RequestBody *OpenAPIRequestBody        `yaml:"requestBody,omitempty" json:"requestBody,omitempty"`
 	Responses   map[string]OpenAPIResponse `yaml:"responses" json:"responses"`
+	Security    []map[string][]string      `yaml:"security,omitempty" json:"security,omitempty"`
 }
 
 // OpenAPIParameter represents a path or query parameter.
@@ -71,6 +73,18 @@ type OpenAPIMediaType struct {
 type OpenAPIResponse struct {
 	Description string                      `yaml:"description" json:"description"`
 	Content     map[string]OpenAPIMediaType `yaml:"content,omitempty" json:"content,omitempty"`
+}
+
+// OpenAPIComponents holds reusable spec components (security schemes, etc.).
+type OpenAPIComponents struct {
+	SecuritySchemes map[string]OpenAPISecurityScheme `yaml:"securitySchemes,omitempty" json:"securitySchemes,omitempty"`
+}
+
+// OpenAPISecurityScheme describes an authentication mechanism.
+type OpenAPISecurityScheme struct {
+	Type         string `yaml:"type" json:"type"`
+	Scheme       string `yaml:"scheme,omitempty" json:"scheme,omitempty"`
+	BearerFormat string `yaml:"bearerFormat,omitempty" json:"bearerFormat,omitempty"`
 }
 
 // OpenAPISchema represents a JSON Schema-compatible type definition.
@@ -130,6 +144,7 @@ func GenerateOpenAPI(s StoreReader, opts ExportOptions) (*OpenAPISpec, int, erro
 
 	paths := make(map[string]OpenAPIPathItem)
 	count := 0
+	hasAuthEndpoint := false
 
 	for _, ep := range endpoints {
 		// Always skip gRPC — no schema support in Phase 1.
@@ -142,6 +157,20 @@ func GenerateOpenAPI(s StoreReader, opts ExportOptions) (*OpenAPISpec, int, erro
 
 		// Build path parameters from {param} segments.
 		params := extractPathParams(ep.PathPattern)
+
+		// Append query parameters observed from traffic.
+		queryParamRows, err := s.GetQueryParams(ep.ID)
+		if err != nil {
+			return nil, 0, fmt.Errorf("export: get query params for endpoint %d: %w", ep.ID, err)
+		}
+		for _, qp := range queryParamRows {
+			params = append(params, OpenAPIParameter{
+				Name:     qp.ParamName,
+				In:       "query",
+				Required: false,
+				Schema:   OpenAPISchema{Type: "string"},
+			})
+		}
 
 		// Get field confidence for request body construction.
 		fieldRows, err := s.GetFieldConfidence(ep.ID)
@@ -190,6 +219,11 @@ func GenerateOpenAPI(s StoreReader, opts ExportOptions) (*OpenAPISpec, int, erro
 			Responses:   responses,
 		}
 
+		if ep.RequiresAuth && !isTokenGenerationPath(ep.PathPattern) {
+			op.Security = []map[string][]string{{"bearerAuth": {}}}
+			hasAuthEndpoint = true
+		}
+
 		pathItem := paths[ep.PathPattern]
 		setOperation(&pathItem, ep.Method, op)
 		paths[ep.PathPattern] = pathItem
@@ -203,6 +237,17 @@ func GenerateOpenAPI(s StoreReader, opts ExportOptions) (*OpenAPISpec, int, erro
 			Version: opts.InfoVersion,
 		},
 		Paths: paths,
+	}
+	if hasAuthEndpoint {
+		spec.Components = &OpenAPIComponents{
+			SecuritySchemes: map[string]OpenAPISecurityScheme{
+				"bearerAuth": {
+					Type:         "http",
+					Scheme:       "bearer",
+					BearerFormat: "JWT",
+				},
+			},
+		}
 	}
 
 	return spec, count, nil

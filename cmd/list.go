@@ -37,6 +37,7 @@ func RunList(args []string, cfg *config.Config) {
     protocol   rest / graphql / grpc
     status     observed HTTP status codes
     framework  detected framework (e.g. aspnet-mvc, nestjs)
+    auth       whether the endpoint requires authentication (yes / -)
     example:   --cols method,path,source,file,calls`)
 
 	if err := fs.Parse(args); err != nil {
