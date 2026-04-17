@@ -87,7 +87,8 @@ const configTemplate = `# probe configuration
 #   min_calls: 0            # 0 = include scan-only; 1 = observed traffic only
 #   info_title: "My API"
 #   info_version: "1.0.0"
-#   outputs:                # default output paths per format (used by --postman, --curl, etc.)
+#   output_dir: ./exports   # all formats go here, auto-named (<dir>.<ext>)
+#   outputs:                # per-format overrides — wins over output_dir
 #     openapi: api.yaml
 #     json:    api.json
 #     swagger: swagger.yaml

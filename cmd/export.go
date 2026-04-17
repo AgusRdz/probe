@@ -77,15 +77,23 @@ func RunExport(args []string, cfg *config.Config) {
 		}
 	}
 
-	// Resolve output path:
+	// Resolve output path — priority order:
 	// 1. --out flag (always wins)
-	// 2. cfg.Export.Outputs[format] (config default for this format)
-	// 3. <cwd-basename><ext> when using a shorthand flag
-	// 4. stdout (--format without --out, no config)
+	// 2. cfg.Export.Outputs[format] (per-format override in config)
+	// 3. cfg.Export.OutputDir/<base><ext> (shared output directory in config)
+	// 4. <cwd-basename><ext> when using a shorthand flag
+	// 5. stdout (--format without --out and no config)
 	resolvedOut := *out
 	if resolvedOut == "" {
 		if cfgOut, ok := cfg.Export.Outputs[resolvedFormat]; ok && cfgOut != "" {
 			resolvedOut = cfgOut
+		} else if cfg.Export.OutputDir != "" {
+			cwd, _ := os.Getwd()
+			base := strings.Trim(slugRe.ReplaceAllString(strings.ToLower(filepath.Base(cwd)), "-"), "-")
+			if base == "" {
+				base = "api"
+			}
+			resolvedOut = filepath.Join(cfg.Export.OutputDir, base+formatExtensions[resolvedFormat])
 		} else if usingShorthand {
 			cwd, _ := os.Getwd()
 			base := strings.Trim(slugRe.ReplaceAllString(strings.ToLower(filepath.Base(cwd)), "-"), "-")

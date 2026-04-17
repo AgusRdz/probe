@@ -50,19 +50,20 @@ probe list --cols method,path,source,file,calls
 # Inspect one endpoint
 probe show GET /users/{id}
 
-# Export (OpenAPI YAML by default)
-probe export --out api.yaml
+# Export — shorthand flags auto-name the file from your directory name
+probe export --openapi    # → my-api.yaml
+probe export --postman    # → my-api.postman_collection.json
+probe export --curl       # → my-api.sh
+probe export --httpie     # → my-api.httpie.sh
+probe export --swagger    # → my-api.swagger.yaml
+probe export --bruno      # → my-api-bruno/  (directory)
+probe export --json       # → my-api.json
 
-# Export in other formats
-probe export --format json       --out api.json
-probe export --format swagger    --out swagger.yaml
-probe export --format postman    --out collection.json
-probe export --format curl       --out api.sh
-probe export --format httpie     --out api-httpie.sh
-probe export --format bruno      --out ./my-api-bruno   # writes a directory
+# Override the output path
+probe export --postman --out ./exports/collection.json
 
 # Only export endpoints seen in real traffic (skip scan-only)
-probe export --min-calls 1 --out api.yaml
+probe export --postman --min-calls 1
 
 # Scan source code for routes (no traffic needed)
 probe scan ./myapp
@@ -75,25 +76,44 @@ probe update
 
 ## Export formats
 
-`probe export` supports seven output formats via `--format`. All formats respect `--min-calls` and `--out`.
+Seven formats supported. Use shorthand flags for the simplest experience — the output file is named automatically from your project directory.
 
-| Format | Flag | Output | Description |
+| Shorthand | Format | Default filename | Description |
 |---|---|---|---|
-| OpenAPI 3.x YAML | `--format openapi` | file / stdout | Default. Works with Swagger UI, Redoc, Stoplight, etc. |
-| OpenAPI 3.x JSON | `--format json` | file / stdout | Same spec as above, JSON encoding |
-| Swagger 2.0 | `--format swagger` | file / stdout | For tools that only accept Swagger 2.0 |
-| Postman | `--format postman` | file / stdout | Postman Collection v2.1 with body templates |
-| curl | `--format curl` | file / stdout | Shell script — one `curl` command per endpoint |
-| HTTPie | `--format httpie` | file / stdout | Shell script — one `http` command per endpoint |
-| Bruno | `--format bruno` | **directory** | Bruno collection — one `.bru` file per endpoint |
+| `--openapi` | OpenAPI 3.x YAML | `<dir>.yaml` | Works with Swagger UI, Redoc, Stoplight |
+| `--json` | OpenAPI 3.x JSON | `<dir>.json` | Same spec, JSON encoding |
+| `--swagger` | Swagger 2.0 YAML | `<dir>.swagger.yaml` | For tools that only accept Swagger 2.0 |
+| `--postman` | Postman Collection v2.1 | `<dir>.postman_collection.json` | With body templates |
+| `--curl` | curl shell script | `<dir>.sh` | One `curl` command per endpoint |
+| `--httpie` | HTTPie shell script | `<dir>.httpie.sh` | One `http` command per endpoint |
+| `--bruno` | Bruno collection | `<dir>-bruno/` | Directory of `.bru` files |
 
 ```sh
-probe export --format postman --out collection.json
-probe export --format curl    --out api.sh
-probe export --format bruno   --out ./my-api-bruno    # creates a directory
+# Shorthand — file named from your project directory automatically
+probe export --postman          # → my-api.postman_collection.json
+probe export --bruno            # → my-api-bruno/
+
+# Override the path
+probe export --postman --out ./exports/collection.json
+
+# Only observed traffic (skip scan-only endpoints)
+probe export --postman --min-calls 1
 ```
 
-`--min-calls 0` (default) includes scan-only endpoints. `--min-calls 1` exports only endpoints seen in real traffic.
+### Config-based output paths
+
+Set `export.output_dir` to send all formats to one directory. Use `export.outputs` to override specific formats.
+
+```yaml
+# .probe.yml
+export:
+  output_dir: ./exports        # all formats land here, auto-named
+
+  outputs:                     # per-format overrides (wins over output_dir)
+    postman: ./postman/collection.json
+```
+
+With `output_dir` set, `probe export --postman` writes to `./exports/my-api.postman_collection.json` — no `--out` needed. You only need to configure the formats you actually use.
 
 ---
 

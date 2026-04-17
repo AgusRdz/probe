@@ -40,7 +40,8 @@ type ExportConfig struct {
 	OpenAPIVersion  string            `yaml:"openapi_version"`
 	InfoTitle       string            `yaml:"info_title"`
 	InfoVersion     string            `yaml:"info_version"`
-	Outputs         map[string]string `yaml:"outputs"` // per-format default output paths
+	OutputDir       string            `yaml:"output_dir"` // base directory for all format outputs (auto-named)
+	Outputs         map[string]string `yaml:"outputs"`    // per-format overrides (wins over output_dir)
 }
 
 // OutputConfig controls CLI presentation.
@@ -255,6 +256,9 @@ func merge(base, override *Config) {
 	}
 	if override.Export.MinCalls != 0 {
 		base.Export.MinCalls = override.Export.MinCalls
+	}
+	if override.Export.OutputDir != "" {
+		base.Export.OutputDir = override.Export.OutputDir
 	}
 	for k, v := range override.Export.Outputs {
 		if base.Export.Outputs == nil {
