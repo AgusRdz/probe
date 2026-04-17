@@ -13,7 +13,8 @@ import (
 // DetailOptions controls detail rendering.
 type DetailOptions struct {
 	NoColor   bool
-	ShowCalls bool // --calls flag: show individual observations
+	ShowCalls bool                  // --calls flag: show individual observations
+	Variants  []store.RequestVariant // request variants detected for this endpoint
 }
 
 // PrintDetail writes full endpoint detail to w:
@@ -99,12 +100,66 @@ func PrintDetail(
 		nl()
 	}
 
+	// ── Variants ──────────────────────────────────────────────────────────────
+	if len(opts.Variants) > 1 {
+		heading(fmt.Sprintf("Variants (%d)", len(opts.Variants)))
+		nl()
+		printVariantsTable(w, opts.Variants, opts.NoColor)
+		nl()
+	}
+
 	// ── Observations ──────────────────────────────────────────────────────────
 	if opts.ShowCalls && len(observations) > 0 {
 		heading(fmt.Sprintf("Recent observations (%d)", len(observations)))
 		nl()
 		printObservations(w, observations, opts.NoColor)
 		nl()
+	}
+}
+
+// printVariantsTable renders a compact table of request variants.
+func printVariantsTable(w io.Writer, variants []store.RequestVariant, noColor bool) {
+	const (
+		hFingerprint = "FINGERPRINT"
+		hLabel       = "LABEL"
+		hCalls       = "CALLS"
+	)
+
+	wFP, wLabel := len(hFingerprint), len(hLabel)
+
+	type vrow struct {
+		fingerprint string
+		label       string
+		calls       string
+	}
+
+	rows := make([]vrow, 0, len(variants))
+	for _, v := range variants {
+		label := v.Label
+		if label == "" {
+			label = "—"
+		}
+		r := vrow{
+			fingerprint: v.Fingerprint,
+			label:       label,
+			calls:       fmt.Sprintf("%d", v.CallCount),
+		}
+		if len(r.fingerprint) > wFP {
+			wFP = len(r.fingerprint)
+		}
+		if len(r.label) > wLabel {
+			wLabel = len(r.label)
+		}
+		rows = append(rows, r)
+	}
+
+	header := fmt.Sprintf("  %-*s  %-*s  %s", wFP, hFingerprint, wLabel, hLabel, hCalls)
+	fmt.Fprintln(w, colorize(header, colorDimStr, noColor))
+	sep := "  " + strings.Repeat("─", len(header)-2)
+	fmt.Fprintln(w, colorize(sep, colorDimStr, noColor))
+
+	for _, r := range rows {
+		fmt.Fprintf(w, "  %-*s  %-*s  %s\n", wFP, r.fingerprint, wLabel, r.label, r.calls)
 	}
 }
 

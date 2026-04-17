@@ -84,6 +84,12 @@ func RunShow(args []string, cfg *config.Config) {
 		os.Exit(1)
 	}
 
+	variants, err := s.GetVariants(found.ID)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "probe: get variants: %v\n", err)
+		os.Exit(1)
+	}
+
 	var observations []store.Observation
 	if *showCalls {
 		observations, err = s.GetObservations(found.ID, 20)
@@ -97,11 +103,13 @@ func RunShow(args []string, cfg *config.Config) {
 		type jsonOut struct {
 			Endpoint     store.Endpoint              `json:"endpoint"`
 			FieldConf    []store.FieldConfidenceRow  `json:"field_confidence"`
+			Variants     []store.RequestVariant      `json:"variants,omitempty"`
 			Observations []store.Observation         `json:"observations,omitempty"`
 		}
 		if err := render.PrintJSON(os.Stdout, jsonOut{
 			Endpoint:     *found,
 			FieldConf:    fieldConf,
+			Variants:     variants,
 			Observations: observations,
 		}, cfg.Output.JSONIndent); err != nil {
 			fmt.Fprintf(os.Stderr, "probe: render json: %v\n", err)
@@ -113,5 +121,6 @@ func RunShow(args []string, cfg *config.Config) {
 	render.PrintDetail(os.Stdout, *found, fieldConf, observations, render.DetailOptions{
 		NoColor:   cfg.Output.NoColor,
 		ShowCalls: *showCalls,
+		Variants:  variants,
 	})
 }
