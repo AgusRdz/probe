@@ -172,11 +172,15 @@ func extractASPNetMVCFile(path string, schemas map[string]*observer.Schema, conv
 	}
 	classPrefixLine := -1
 	for idx, line := range lines {
+		t := strings.TrimSpace(line)
+		if strings.HasPrefix(t, "//") {
+			continue // skip commented-out attributes
+		}
 		// Check both [Route("...")] and [RoutePrefix("...")] for class-level prefix.
 		raw := ""
-		if m := reCSRoutePrefixAttr.FindStringSubmatch(line); m != nil {
+		if m := reCSRoutePrefixAttr.FindStringSubmatch(t); m != nil {
 			raw = m[1]
-		} else if m := reCSRouteAttr.FindStringSubmatch(line); m != nil {
+		} else if m := reCSRouteAttr.FindStringSubmatch(t); m != nil {
 			raw = m[1]
 		}
 		if raw != "" {
@@ -205,6 +209,9 @@ func extractASPNetMVCFile(path string, schemas map[string]*observer.Schema, conv
 
 	for i, line := range lines {
 		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "//") {
+			continue // skip commented-out attributes and code
+		}
 
 		// Track [Obsolete] for next method.
 		if reCSObsolete.MatchString(trimmed) {
