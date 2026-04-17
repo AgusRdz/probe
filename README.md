@@ -115,6 +115,15 @@ export:
 
 With `output_dir` set, `probe export --postman` writes to `./exports/my-api.postman_collection.json` — no `--out` needed. You only need to configure the formats you actually use.
 
+> **Windows paths:** Use relative paths (`./exports`) or forward slashes (`C:/Users/me/exports`) in YAML — unquoted backslashes are invalid YAML and will cause a parse error.
+> ```yaml
+> export:
+>   output_dir: ./exports              # ✓ recommended — works everywhere
+>   output_dir: C:/Users/me/exports    # ✓ absolute with forward slashes
+>   output_dir: "C:\\Users\\me\\exports" # ✓ absolute with escaped backslashes
+>   output_dir: C:\Users\me\exports    # ✗ will fail — unquoted backslashes
+> ```
+
 ---
 
 ## Intercept setup — pointing your client at probe
