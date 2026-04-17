@@ -87,8 +87,8 @@ Seven formats supported. Use shorthand flags for the simplest experience — the
 | `--json` | OpenAPI 3.x JSON | `<dir>.json` | Same spec, JSON encoding |
 | `--swagger` | Swagger 2.0 YAML | `<dir>.swagger.yaml` | For tools that only accept Swagger 2.0 |
 | `--postman` | Postman Collection v2.1 | `<dir>.postman_collection.json` | Body, headers, query params |
-| `--curl` | curl shell script | `<dir>.sh` | One `curl` command per endpoint |
-| `--httpie` | HTTPie shell script | `<dir>.httpie.sh` | One `http` command per endpoint |
+| `--curl` | curl shell script | `<dir>.sh` | One `curl` command per endpoint (CLI only) |
+| `--httpie` | HTTPie shell script | `<dir>.httpie.sh` | One `http` command per endpoint (CLI only, not HTTPie Desktop) |
 | `--bruno` | Bruno collection | `<dir>-bruno/` | Directory of `.bru` files |
 
 ```sh
