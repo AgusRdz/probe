@@ -132,6 +132,17 @@ func RunExport(args []string, cfg *config.Config) {
 			fmt.Fprintf(os.Stderr, "probe: generate curl: %v\n", err)
 			os.Exit(1)
 		}
+		if resolvedOut != "" {
+			if existing, statErr := os.ReadFile(resolvedOut); statErr == nil {
+				merged, added := export.MergeScript(existing, data)
+				printScriptMergeSummary(resolvedOut, added)
+				if err := writeBytes(merged, resolvedOut); err != nil {
+					fmt.Fprintf(os.Stderr, "probe: write merged curl: %v\n", err)
+					os.Exit(1)
+				}
+				break
+			}
+		}
 		if err := writeBytes(data, resolvedOut); err != nil {
 			fmt.Fprintf(os.Stderr, "probe: write curl: %v\n", err)
 			os.Exit(1)
@@ -144,6 +155,17 @@ func RunExport(args []string, cfg *config.Config) {
 			fmt.Fprintf(os.Stderr, "probe: generate httpie: %v\n", err)
 			os.Exit(1)
 		}
+		if resolvedOut != "" {
+			if existing, statErr := os.ReadFile(resolvedOut); statErr == nil {
+				merged, added := export.MergeScript(existing, data)
+				printScriptMergeSummary(resolvedOut, added)
+				if err := writeBytes(merged, resolvedOut); err != nil {
+					fmt.Fprintf(os.Stderr, "probe: write merged httpie: %v\n", err)
+					os.Exit(1)
+				}
+				break
+			}
+		}
 		if err := writeBytes(data, resolvedOut); err != nil {
 			fmt.Fprintf(os.Stderr, "probe: write httpie: %v\n", err)
 			os.Exit(1)
@@ -155,6 +177,12 @@ func RunExport(args []string, cfg *config.Config) {
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "probe: generate swagger: %v\n", err)
 			os.Exit(1)
+		}
+		if resolvedOut != "" {
+			if _, statErr := os.Stat(resolvedOut); statErr == nil {
+				runSpecMerge(swaggerPathsToOpenAPI(spec.Paths), resolvedOut, "swagger")
+				break
+			}
 		}
 		if err := writeToFileOrStdout(resolvedOut, func(w *os.File) error {
 			return export.WriteSwaggerYAML(w, spec)
@@ -183,6 +211,59 @@ func RunExport(args []string, cfg *config.Config) {
 			fmt.Fprintf(os.Stderr, "probe: create bruno dir: %v\n", err)
 			os.Exit(1)
 		}
+		// Auto-merge: if the directory already exists with .bru files, merge.
+		added, conflicts, err := export.ComputeBrunoMerge(dir, collection)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "probe: compute bruno merge: %v\n", err)
+			os.Exit(1)
+		}
+		if len(added) > 0 || len(conflicts) > 0 {
+			fmt.Fprintf(os.Stderr, "\nprobe: merging Bruno collection: %s/ (%d new, %d conflict(s))\n\n",
+				dir, len(added), len(conflicts))
+			for _, name := range added {
+				fmt.Fprintf(os.Stderr, "  added    %s\n", name)
+			}
+			toWrite := added
+			if len(conflicts) > 0 && !*noInteractive {
+				scanner := bufio.NewScanner(os.Stdin)
+				skipAll := false
+				for _, c := range conflicts {
+					if skipAll {
+						fmt.Fprintf(os.Stderr, "  skipped  %s (conflict — kept existing)\n", c.Filename)
+						continue
+					}
+					fmt.Fprintf(os.Stderr, "conflict: %s\n", c.Filename)
+					fmt.Fprintf(os.Stderr, "  [k]eep existing  [r]eplace  [s]kip all conflicts: ")
+					resolution := "keep"
+					if scanner.Scan() {
+						switch strings.TrimSpace(strings.ToLower(scanner.Text())) {
+						case "r":
+							resolution = "replace"
+						case "s":
+							resolution = "keep"
+							skipAll = true
+						}
+					}
+					if resolution == "replace" {
+						toWrite = append(toWrite, c.Filename)
+					} else {
+						fmt.Fprintf(os.Stderr, "  skipped  %s (conflict — kept existing)\n", c.Filename)
+					}
+					fmt.Fprintln(os.Stderr)
+				}
+			} else {
+				for _, c := range conflicts {
+					fmt.Fprintf(os.Stderr, "  skipped  %s (conflict — kept existing)\n", c.Filename)
+				}
+			}
+			if err := export.ApplyBrunoMerge(dir, collection, toWrite); err != nil {
+				fmt.Fprintf(os.Stderr, "probe: apply bruno merge: %v\n", err)
+				os.Exit(1)
+			}
+			fmt.Fprintf(os.Stderr, "\nprobe: wrote %d file(s) → %s/\n\n", len(toWrite), dir)
+			break
+		}
+		// Fresh write — no existing .bru files or all identical.
 		for name, content := range collection {
 			if err := os.WriteFile(filepath.Join(dir, name), content, 0o644); err != nil {
 				fmt.Fprintf(os.Stderr, "probe: write bruno file %s: %v\n", name, err)
@@ -228,6 +309,16 @@ func RunExport(args []string, cfg *config.Config) {
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "probe: generate openapi: %v\n", err)
 			os.Exit(1)
+		}
+		if resolvedOut != "" {
+			if _, statErr := os.Stat(resolvedOut); statErr == nil {
+				if resolvedFormat == "json" {
+					runSpecMerge(spec.Paths, resolvedOut, "json")
+				} else {
+					runSpecMerge(spec.Paths, resolvedOut, "openapi")
+				}
+				break
+			}
 		}
 		if err := writeToFileOrStdout(resolvedOut, func(w *os.File) error {
 			if resolvedFormat == "json" {
@@ -332,6 +423,103 @@ func runPostmanMerge(col *export.PostmanCollection, path string, noInteractive b
 
 	totalItems := len(existing.Items) + len(result.Added)
 	fmt.Fprintf(os.Stderr, "\nprobe: wrote %d items → %s\n\n", totalItems, path)
+}
+
+// runSpecMerge loads an existing YAML or JSON spec file, merges new
+// path+method entries from incoming, and writes the result back to path.
+// format is "openapi" (YAML), "json" (JSON), or "swagger" (YAML).
+// Existing entries are never modified — add-only merge.
+func runSpecMerge(incoming map[string]export.OpenAPIPathItem, path, format string) {
+	incomingSpec := &export.OpenAPISpec{Paths: incoming}
+
+	var existingMap map[string]interface{}
+	var loadErr error
+	if format == "json" {
+		existingMap, loadErr = export.LoadExistingJSONMap(path)
+	} else {
+		existingMap, loadErr = export.LoadExistingYAMLMap(path)
+	}
+	if loadErr != nil {
+		fmt.Fprintf(os.Stderr, "probe: read existing spec: %v\n", loadErr)
+		os.Exit(1)
+	}
+
+	added := export.MergeOpenAPIPaths(existingMap, incomingSpec)
+
+	fmt.Fprintf(os.Stderr, "\nprobe: merging %s (%d new endpoint(s)) → %s\n\n",
+		format, len(added), path)
+	for _, key := range added {
+		fmt.Fprintf(os.Stderr, "  added    %s\n", key)
+	}
+	if len(added) == 0 {
+		fmt.Fprintf(os.Stderr, "  (no new endpoints)\n")
+	}
+	fmt.Fprintln(os.Stderr)
+
+	var out []byte
+	var serErr error
+	if format == "json" {
+		out, serErr = export.SerializeMergedJSON(existingMap)
+	} else {
+		out, serErr = export.SerializeMergedYAML(existingMap)
+	}
+	if serErr != nil {
+		fmt.Fprintf(os.Stderr, "probe: serialize merged spec: %v\n", serErr)
+		os.Exit(1)
+	}
+
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		fmt.Fprintf(os.Stderr, "probe: create directories: %v\n", err)
+		os.Exit(1)
+	}
+	if err := os.WriteFile(path, out, 0o644); err != nil {
+		fmt.Fprintf(os.Stderr, "probe: write merged spec: %v\n", err)
+		os.Exit(1)
+	}
+}
+
+// swaggerPathsToOpenAPI converts Swagger 2.0 path items to OpenAPI path items
+// for the purpose of path merge (method names are identical).
+func swaggerPathsToOpenAPI(swaggerPaths map[string]export.SwaggerPathItem) map[string]export.OpenAPIPathItem {
+	result := make(map[string]export.OpenAPIPathItem, len(swaggerPaths))
+	for path, item := range swaggerPaths {
+		var oa export.OpenAPIPathItem
+		if item.Get != nil {
+			oa.Get = &export.OpenAPIOperation{}
+		}
+		if item.Post != nil {
+			oa.Post = &export.OpenAPIOperation{}
+		}
+		if item.Put != nil {
+			oa.Put = &export.OpenAPIOperation{}
+		}
+		if item.Patch != nil {
+			oa.Patch = &export.OpenAPIOperation{}
+		}
+		if item.Delete != nil {
+			oa.Delete = &export.OpenAPIOperation{}
+		}
+		if item.Head != nil {
+			oa.Head = &export.OpenAPIOperation{}
+		}
+		if item.Options != nil {
+			oa.Options = &export.OpenAPIOperation{}
+		}
+		result[path] = oa
+	}
+	return result
+}
+
+// printScriptMergeSummary prints a summary of a script merge operation.
+func printScriptMergeSummary(path string, added []string) {
+	fmt.Fprintf(os.Stderr, "\nprobe: merging script (%d new endpoint(s)) → %s\n\n", len(added), path)
+	for _, key := range added {
+		fmt.Fprintf(os.Stderr, "  added    %s\n", key)
+	}
+	if len(added) == 0 {
+		fmt.Fprintf(os.Stderr, "  (no new endpoints)\n")
+	}
+	fmt.Fprintln(os.Stderr)
 }
 
 func printExportSummary(label, out string) {
