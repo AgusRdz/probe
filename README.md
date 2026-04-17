@@ -50,8 +50,19 @@ probe list --cols method,path,source,file,calls
 # Inspect one endpoint
 probe show GET /users/{id}
 
-# Export as OpenAPI
-probe export --out openapi.yaml
+# Export (OpenAPI YAML by default)
+probe export --out api.yaml
+
+# Export in other formats
+probe export --format json       --out api.json
+probe export --format swagger    --out swagger.yaml
+probe export --format postman    --out collection.json
+probe export --format curl       --out api.sh
+probe export --format httpie     --out api-httpie.sh
+probe export --format bruno      --out ./my-api-bruno   # writes a directory
+
+# Only export endpoints seen in real traffic (skip scan-only)
+probe export --min-calls 1 --out api.yaml
 
 # Scan source code for routes (no traffic needed)
 probe scan ./myapp
@@ -59,6 +70,30 @@ probe scan ./myapp
 # Update to latest version
 probe update
 ```
+
+---
+
+## Export formats
+
+`probe export` supports seven output formats via `--format`. All formats respect `--min-calls` and `--out`.
+
+| Format | Flag | Output | Description |
+|---|---|---|---|
+| OpenAPI 3.x YAML | `--format openapi` | file / stdout | Default. Works with Swagger UI, Redoc, Stoplight, etc. |
+| OpenAPI 3.x JSON | `--format json` | file / stdout | Same spec as above, JSON encoding |
+| Swagger 2.0 | `--format swagger` | file / stdout | For tools that only accept Swagger 2.0 |
+| Postman | `--format postman` | file / stdout | Postman Collection v2.1 with body templates |
+| curl | `--format curl` | file / stdout | Shell script — one `curl` command per endpoint |
+| HTTPie | `--format httpie` | file / stdout | Shell script — one `http` command per endpoint |
+| Bruno | `--format bruno` | **directory** | Bruno collection — one `.bru` file per endpoint |
+
+```sh
+probe export --format postman --out collection.json
+probe export --format curl    --out api.sh
+probe export --format bruno   --out ./my-api-bruno    # creates a directory
+```
+
+`--min-calls 0` (default) includes scan-only endpoints. `--min-calls 1` exports only endpoints seen in real traffic.
 
 ---
 
