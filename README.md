@@ -5,21 +5,29 @@
 <h1 align="center">probe</h1>
 
 <p align="center">
-  Transparent reverse proxy that discovers and documents API endpoints by observing real traffic.<br/>
-  No code changes to target services. No OpenAPI spec required. Pure observation.
+  Discovers and documents API endpoints — by scanning source code or observing live traffic.<br/>
+  No code changes. No OpenAPI spec required.
 </p>
 
 ---
 
 ## How it works
 
-`probe intercept` sits between your client and server. Every request/response passes through unchanged. probe infers field types, tracks schema coverage across calls, and normalises path parameters — then lets you export everything as an OpenAPI spec.
+probe has two modes — use either or both:
 
+**Scan** — static analysis of your codebase. No running server needed. Works on legacy codebases with zero documentation.
+```sh
+probe scan ./my-api
+```
+
+**Intercept** — transparent reverse proxy that learns from real traffic. Every request/response passes through unchanged; probe infers field types, tracks schema coverage, and normalises path parameters.
 ```
 client → probe intercept → your API server
                 ↓
            probe list / show / export
 ```
+
+Then export to whatever format you need.
 
 ---
 
