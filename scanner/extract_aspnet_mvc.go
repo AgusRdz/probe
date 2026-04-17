@@ -54,6 +54,15 @@ var reCSEmailAddress = regexp.MustCompile(`\[EmailAddress\]`)
 // [Obsolete] attribute — maps to deprecated
 var reCSObsolete = regexp.MustCompile(`\[Obsolete`)
 
+// [ActionName("login")] — .NET Framework Web API conventional routing action override
+var reCSActionName = regexp.MustCompile(`\[ActionName\s*\(\s*"([^"]+)"\s*\)\]`)
+
+// routeTemplate: "api/{controller}/{action}/{id}" inside MapHttpRoute
+var reMapHttpRouteTemplate = regexp.MustCompile(`routeTemplate:\s*"([^"]+)"`)
+
+// positional MapHttpRoute("name", "api/{controller}/{id}") — second string arg
+var reMapHttpRoutePositional = regexp.MustCompile(`MapHttpRoute\s*\([^,]+,\s*"([^"]+)"`)
+
 // /// <summary>...</summary>
 var reCSXmlSummary = regexp.MustCompile(`///\s*<summary>\s*(.+)`)
 
@@ -75,13 +84,16 @@ func (e *aspnetMVCExtractor) Extract(dir string, cfg *config.ScanConfig) ([]Scan
 		return nil
 	})
 
+	// Detect conventional route template from WebApiConfig / RouteConfig.
+	conventionalTemplate := detectConventionalRouteTemplate(dir)
+
 	var endpoints []ScannedEndpoint
 	err := walkCSharpFiles(dir, func(path string) error {
 		base := filepath.Base(path)
 		if !strings.HasSuffix(base, "Controller.cs") {
 			return nil
 		}
-		found, ferr := extractASPNetMVCFile(path, schemas)
+		found, ferr := extractASPNetMVCFile(path, schemas, conventionalTemplate)
 		if ferr != nil {
 			fmt.Fprintf(errorWriter, "scanner/aspnet-mvc: error reading %s: %v\n", path, ferr)
 			return nil
@@ -92,8 +104,44 @@ func (e *aspnetMVCExtractor) Extract(dir string, cfg *config.ScanConfig) ([]Scan
 	return endpoints, err
 }
 
+// detectConventionalRouteTemplate scans App_Start/*.cs and similar config files
+// for MapHttpRoute calls and returns the first route template found (e.g. "api/{controller}/{action}/{id}").
+// Returns empty string if none found (attribute routing only).
+func detectConventionalRouteTemplate(dir string) string {
+	var template string
+	_ = walkCSharpFiles(dir, func(path string) error {
+		if template != "" {
+			return nil
+		}
+		base := filepath.Base(path)
+		// Only look in config/startup files.
+		if !strings.Contains(strings.ToLower(base), "config") &&
+			!strings.Contains(strings.ToLower(base), "startup") &&
+			!strings.Contains(strings.ToLower(base), "program") {
+			return nil
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return nil
+		}
+		content := string(data)
+		// Named parameter: routeTemplate: "api/{controller}/{action}/{id}"
+		if m := reMapHttpRouteTemplate.FindStringSubmatch(content); m != nil {
+			template = m[1]
+			return nil
+		}
+		// Positional: MapHttpRoute("Default", "api/{controller}/{action}")
+		if m := reMapHttpRoutePositional.FindStringSubmatch(content); m != nil {
+			template = m[1]
+		}
+		return nil
+	})
+	return template
+}
+
 // extractASPNetMVCFile parses a C# controller file for route endpoints.
-func extractASPNetMVCFile(path string, schemas map[string]*observer.Schema) ([]ScannedEndpoint, error) {
+// conventionalTemplate is used for controllers without attribute routing (may be empty).
+func extractASPNetMVCFile(path string, schemas map[string]*observer.Schema, conventionalTemplate string) ([]ScannedEndpoint, error) {
 	f, err := os.Open(path)
 	if err != nil {
 		return nil, err
@@ -144,10 +192,14 @@ func extractASPNetMVCFile(path string, schemas map[string]*observer.Schema) ([]S
 		classPrefix = controllerBasePath
 	}
 
+	// hasAttributeRouting is true when the class has an explicit [Route]/[RoutePrefix].
+	hasAttributeRouting := classPrefixLine >= 0
+
 	var endpoints []ScannedEndpoint
 	var pendingMethod string
 	var pendingMethodPath string  // from [HttpMethod("path")]
 	var pendingRoutePath string   // from method-level [Route("path")]
+	var pendingActionName string  // from [ActionName("xxx")]
 	var pendingDeprecated bool
 	var pendingDescription string
 
@@ -163,6 +215,12 @@ func extractASPNetMVCFile(path string, schemas map[string]*observer.Schema) ([]S
 		// Track /// <summary> description.
 		if m := reCSXmlSummary.FindStringSubmatch(trimmed); m != nil {
 			pendingDescription = strings.TrimSpace(m[1])
+			continue
+		}
+
+		// [ActionName("xxx")] — overrides the action segment in conventional routing.
+		if m := reCSActionName.FindStringSubmatch(trimmed); m != nil {
+			pendingActionName = m[1]
 			continue
 		}
 
@@ -188,12 +246,36 @@ func extractASPNetMVCFile(path string, schemas map[string]*observer.Schema) ([]S
 					responseType = m[2]
 				}
 
+				// Derive method name for conventional routing fallback.
+				methodName := strings.ToLower(m[3])
+
 				// Use explicit method path, fall back to method-level [Route], then empty.
 				methodPath := pendingMethodPath
 				if methodPath == "" {
 					methodPath = pendingRoutePath
 				}
-				fullPath := NormalizeFrameworkPath(classPrefix + "/" + strings.TrimLeft(methodPath, "/"))
+
+				var fullPath string
+				if !hasAttributeRouting && methodPath == "" && conventionalTemplate != "" {
+					// Conventional routing: substitute {controller} and {action} in template.
+					// Strip optional trailing /{id} or [/{id}] segment — those become separate routes.
+					controllerSeg := strings.TrimPrefix(controllerBasePath, "/")
+					actionSeg := pendingActionName
+					if actionSeg == "" {
+						actionSeg = methodName
+					}
+					tpl := conventionalTemplate
+					// Remove optional id segment (e.g. "/{id}" or "[/{id}]").
+					tpl = strings.TrimSuffix(tpl, "/{id}")
+					tpl = strings.TrimSuffix(tpl, "/[{id}]")
+					tpl = strings.TrimSuffix(tpl, "/{id?}")
+					tpl = strings.ReplaceAll(tpl, "{controller}", controllerSeg)
+					tpl = strings.ReplaceAll(tpl, "{action}", actionSeg)
+					fullPath = tpl
+				} else {
+					fullPath = NormalizeFrameworkPath(classPrefix + "/" + strings.TrimLeft(methodPath, "/"))
+				}
+
 				// Collapse double slashes.
 				for strings.Contains(fullPath, "//") {
 					fullPath = strings.ReplaceAll(fullPath, "//", "/")
@@ -237,6 +319,7 @@ func extractASPNetMVCFile(path string, schemas map[string]*observer.Schema) ([]S
 				pendingMethod = ""
 				pendingMethodPath = ""
 				pendingRoutePath = ""
+				pendingActionName = ""
 				pendingDeprecated = false
 				pendingDescription = ""
 			}

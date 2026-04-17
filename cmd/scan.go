@@ -89,12 +89,22 @@ func RunScan(args []string, cfg *config.Config) {
 		return
 	}
 
-	// Persist to store.
-	s, err := store.Open(*db)
+	// Persist to store — derive DB name from scan directory when not overridden.
+	dbPath := *db
+	if dbPath == "" {
+		var err2 error
+		dbPath, err2 = store.DBPathForDir(scanDir)
+		if err2 != nil {
+			fmt.Fprintf(os.Stderr, "probe scan: resolve db path: %v\n", err2)
+			os.Exit(1)
+		}
+	}
+	s, err := store.Open(dbPath)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "probe scan: open store: %v\n", err)
 		os.Exit(1)
 	}
+	fmt.Fprintf(os.Stdout, "  DB: %s\n\n", dbPath)
 	defer s.Close() //nolint:errcheck
 
 	var newCount, updatedCount int

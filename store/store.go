@@ -228,14 +228,14 @@ func (s *Store) Record(pair observer.CapturedPair, reqSchema, respSchema *observ
 	return tx.Commit()
 }
 
-// GetEndpoints returns all endpoints ordered by method, path_pattern.
+// GetEndpoints returns all endpoints ordered alphabetically by path then method.
 func (s *Store) GetEndpoints() ([]Endpoint, error) {
 	rows, err := s.db.Query(`
 		SELECT id, method, path_pattern, protocol, source, framework,
 		       source_file, source_line, first_seen, last_seen,
 		       call_count, description, tags_json, deprecated
 		FROM endpoints
-		ORDER BY protocol, method, path_pattern`)
+		ORDER BY path_pattern, method`)
 	if err != nil {
 		return nil, fmt.Errorf("store: get endpoints: %w", err)
 	}
@@ -553,6 +553,30 @@ func applyPragmas(db *sql.DB) error {
 
 func defaultDBPath() (string, error) {
 	return dbPathForName("probe")
+}
+
+// DBPathForDir returns a DB path derived from the scan directory name,
+// e.g. scanning "ciranet-identity-api" → .../ciranet-identity-api.db
+// Falls back to the default probe.db if the directory name is empty.
+func DBPathForDir(dir string) (string, error) {
+	name := filepath.Base(filepath.Clean(dir))
+	if name == "" || name == "." {
+		return defaultDBPath()
+	}
+	// Sanitise: keep only filename-safe chars.
+	var b strings.Builder
+	for _, c := range strings.ToLower(name) {
+		if (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '-' || c == '_' {
+			b.WriteRune(c)
+		} else {
+			b.WriteRune('-')
+		}
+	}
+	safe := strings.Trim(b.String(), "-")
+	if safe == "" {
+		return defaultDBPath()
+	}
+	return dbPathForName(safe)
 }
 
 // DBPathForTarget returns the DB path derived from the target URL's hostname,
