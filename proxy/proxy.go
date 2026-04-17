@@ -2,6 +2,7 @@ package proxy
 
 import (
 	"context"
+	"crypto/tls"
 	"fmt"
 	"net/http"
 	"net/http/httputil"
@@ -32,7 +33,9 @@ type Proxy struct {
 // Starts the drainer goroutine (reads from ch, calls observer.Extract, calls store.Record).
 // Strips X-Forwarded-Host and X-Real-IP from forwarded requests (security invariant 5).
 // Default channel buffer size: 100.
-func New(target string, s *store.Store, cfg *config.Config) (*Proxy, error) {
+// When insecure is true, TLS certificate verification is skipped (for dev environments
+// with self-signed certs, IIS Express, mkcert, etc.).
+func New(target string, s *store.Store, cfg *config.Config, insecure bool) (*Proxy, error) {
 	// Validate scheme first.
 	if !strings.HasPrefix(target, "http://") && !strings.HasPrefix(target, "https://") {
 		return nil, fmt.Errorf("probe: target must begin with http:// or https://: %s", target)
@@ -43,8 +46,14 @@ func New(target string, s *store.Store, cfg *config.Config) (*Proxy, error) {
 		return nil, fmt.Errorf("probe: invalid target URL %q: %w", target, err)
 	}
 
+	// Shared transport — used by both the startup probe and the reverse proxy.
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	if insecure {
+		transport.TLSClientConfig = &tls.Config{InsecureSkipVerify: true} //nolint:gosec — explicit user opt-in
+	}
+
 	// Validate reachability with a HEAD request (5s timeout).
-	client := &http.Client{Timeout: 5 * time.Second}
+	client := &http.Client{Timeout: 5 * time.Second, Transport: transport}
 	resp, err := client.Head(target)
 	if err != nil {
 		return nil, fmt.Errorf("probe: target unreachable: %s", target)
@@ -56,6 +65,7 @@ func New(target string, s *store.Store, cfg *config.Config) (*Proxy, error) {
 	// 4xx is fine — target is up, just requires auth.
 
 	rp := httputil.NewSingleHostReverseProxy(targetURL)
+	rp.Transport = transport
 
 	// Capture the default director so we can run it then strip sensitive headers.
 	originalDirector := rp.Director

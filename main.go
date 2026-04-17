@@ -81,7 +81,9 @@ func printHelp() {
 	b.WriteString(row("  "+flag("--bind <addr>"), "Bind address (default 127.0.0.1)"))
 	b.WriteString(row("  "+flag("--filter <prefix>"), "Only capture paths with this prefix"))
 	b.WriteString(row("  "+flag("--ignore <paths>"), "Comma-separated path prefixes to skip"))
+	b.WriteString(row("  "+flag("--insecure"), "Skip TLS verification (self-signed certs, IIS Express, mkcert)"))
 	b.WriteString(row("  "+flag("--db <path>"), "Override DB path"))
+	b.WriteString(row("", dim("  Run 'probe help intercept' for setup recipes (Angular, Vite, Docker, IIS…)")))
 	b.WriteString("\n")
 
 	b.WriteString(section("Discovery"))
@@ -142,12 +144,91 @@ func printHelp() {
 	fmt.Print(b.String())
 }
 
+func printInterceptHelp() {
+	b := &strings.Builder{}
+	section := func(name string) string { return bold(cyan(name)) + "\n" }
+	code := func(s string) string { return dim(s) }
+
+	b.WriteString(bold("probe intercept") + " — proxy traffic and capture endpoint schemas\n\n")
+
+	b.WriteString(bold("Usage") + "\n")
+	b.WriteString("  probe intercept --target <url> [flags]\n\n")
+
+	b.WriteString(bold("Flags") + "\n")
+	b.WriteString(fmt.Sprintf("  %-30s %s\n", yellow("--target <url>"), "Upstream URL to proxy (required)"))
+	b.WriteString(fmt.Sprintf("  %-30s %s\n", yellow("--port <n>"), "Local port probe listens on (default 4000)"))
+	b.WriteString(fmt.Sprintf("  %-30s %s\n", yellow("--bind <addr>"), "Bind address (default 127.0.0.1)"))
+	b.WriteString(fmt.Sprintf("  %-30s %s\n", yellow("--filter <prefix>"), "Only capture paths with this prefix"))
+	b.WriteString(fmt.Sprintf("  %-30s %s\n", yellow("--ignore <paths>"), "Comma-separated path prefixes to skip"))
+	b.WriteString(fmt.Sprintf("  %-30s %s\n", yellow("--insecure"), "Skip TLS cert verification (dev certs, IIS Express, mkcert)"))
+	b.WriteString(fmt.Sprintf("  %-30s %s\n", yellow("--db <path>"), "Override DB path"))
+	b.WriteString("\n")
+
+	b.WriteString(bold("How it works") + "\n")
+	b.WriteString("  probe sits between your client and your API. Your client sends requests\n")
+	b.WriteString("  to probe's port — probe forwards them unchanged and records the schemas.\n\n")
+	b.WriteString("  " + code("client → probe (:4000) → your API (:3001)") + "\n\n")
+	b.WriteString("  Each target gets its own DB file automatically.\n\n")
+
+	b.WriteString(section("Setup recipes"))
+
+	b.WriteString(bold("Angular") + " (proxy.conf.json)\n")
+	b.WriteString(code(`  {
+    "/api": {
+      "target": "http://localhost:4000",
+      "changeOrigin": true
+    }
+  }`) + "\n")
+	b.WriteString(code("  # was: \"target\": \"http://localhost:3001\"") + "\n\n")
+
+	b.WriteString(bold("Vite") + " (vite.config.ts)\n")
+	b.WriteString(code(`  server: {
+    proxy: {
+      '/api': 'http://localhost:4000'
+    }
+  }`) + "\n")
+	b.WriteString(code("  # was: 'http://localhost:3001'") + "\n\n")
+
+	b.WriteString(bold("Create React App") + " (package.json)\n")
+	b.WriteString(code(`  "proxy": "http://localhost:4000"`) + "\n\n")
+
+	b.WriteString(bold("Environment variable") + " (any framework)\n")
+	b.WriteString(code("  API_URL=http://localhost:4000 npm start") + "\n")
+	b.WriteString(code("  VITE_API_URL=http://localhost:4000 npm run dev") + "\n\n")
+
+	b.WriteString(bold("Docker Compose") + "\n")
+	b.WriteString(code(`  # Run probe on the host, target the mapped port:
+  probe intercept --target http://localhost:8080
+
+  # Or add probe as a service in the same network:
+  services:
+    probe:
+      image: ...
+      command: probe intercept --target http://api:3001 --port 4000`) + "\n\n")
+
+	b.WriteString(bold("IIS Express / IIS") + "\n")
+	b.WriteString(code("  probe intercept --target https://localhost:44300 --insecure") + "\n")
+	b.WriteString(code("  # --insecure skips the dev certificate check") + "\n\n")
+
+	b.WriteString(bold("Traefik / nginx (local)") + "\n")
+	b.WriteString(code("  probe intercept --target http://localhost:80 --filter /api") + "\n\n")
+
+	b.WriteString(bold("Remote dev / QA environment") + "\n")
+	b.WriteString(code("  probe intercept --target https://api.dev.company.com") + "\n")
+	b.WriteString(code("  # then set API_URL=http://localhost:4000 in your frontend") + "\n\n")
+
+	b.WriteString(bold("Multiple services") + "\n")
+	b.WriteString(code("  probe intercept --target http://localhost:3001 --port 4001") + "\n")
+	b.WriteString(code("  probe intercept --target http://localhost:3002 --port 4002") + "\n")
+	b.WriteString(code("  # each gets its own DB; use probe list --db <path> to query separately") + "\n\n")
+
+	fmt.Print(b.String())
+}
+
 func printCommandHelp(command string) {
-	// Delegate to each subcommand's --help by passing --help as the first flag.
-	// Each command uses flag.ExitOnError which will print usage and exit.
 	switch command {
 	case "intercept":
-		cmd.RunIntercept([]string{"--help"}, &config.Config{})
+		printInterceptHelp()
 	case "list":
 		cmd.RunList([]string{"--help"}, &config.Config{})
 	case "show":

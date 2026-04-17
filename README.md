@@ -38,6 +38,9 @@ irm https://raw.githubusercontent.com/AgusRdz/probe/main/install.ps1 | iex
 # Start capturing traffic — each target gets its own DB automatically
 probe intercept --target http://localhost:3000
 
+# Self-signed cert / IIS Express / mkcert
+probe intercept --target https://localhost:44300 --insecure
+
 # List discovered endpoints
 probe list
 
@@ -56,6 +59,81 @@ probe scan ./myapp
 # Update to latest version
 probe update
 ```
+
+---
+
+## Intercept setup — pointing your client at probe
+
+probe is a transparent proxy: it listens on a local port, forwards requests to your real backend, and records the traffic. The only setup required is pointing your client at probe's port instead of the real backend.
+
+```
+client → probe (:4000) → your API (:3001)
+```
+
+Each target gets its own DB file automatically.
+
+### Angular (`proxy.conf.json`)
+```json
+{
+  "/api": {
+    "target": "http://localhost:4000",
+    "changeOrigin": true
+  }
+}
+```
+*(was `"target": "http://localhost:3001"`)*
+
+### Vite (`vite.config.ts`)
+```ts
+server: {
+  proxy: {
+    '/api': 'http://localhost:4000'
+  }
+}
+```
+
+### Create React App (`package.json`)
+```json
+"proxy": "http://localhost:4000"
+```
+
+### Environment variable (any framework)
+```sh
+API_URL=http://localhost:4000 npm start
+VITE_API_URL=http://localhost:4000 npm run dev
+```
+
+### IIS Express / IIS (dev certificate)
+```sh
+probe intercept --target https://localhost:44300 --insecure
+# --insecure skips TLS cert verification for self-signed / dev certs
+```
+
+### Docker Compose
+```sh
+# probe on the host, target the mapped port
+probe intercept --target http://localhost:8080
+```
+
+### Traefik / nginx (local)
+```sh
+probe intercept --target http://localhost:80 --filter /api
+```
+
+### Remote dev / QA environment
+```sh
+probe intercept --target https://api.dev.company.com
+# then set API_URL=http://localhost:4000 in your frontend
+```
+
+### Multiple services
+```sh
+probe intercept --target http://localhost:3001 --port 4001
+probe intercept --target http://localhost:3002 --port 4002
+# each gets its own DB; use probe list --db <path> to query separately
+```
+
+> **Full recipe reference:** `probe help intercept`
 
 ---
 

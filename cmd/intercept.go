@@ -32,6 +32,7 @@ func RunIntercept(args []string, cfg *config.Config) {
 	filter := fs.String("filter", "", "only capture paths with this prefix")
 	ignore := fs.String("ignore", "", "comma-separated path prefixes to skip")
 	db := fs.String("db", "", "override DB path")
+	insecure := fs.Bool("insecure", false, "skip TLS certificate verification (for self-signed dev certs, IIS Express, mkcert, etc.)")
 	grpcReflect := fs.Bool("grpc-reflect", false, "enable gRPC server reflection (Phase 5)")
 
 	if err := fs.Parse(args); err != nil {
@@ -60,7 +61,7 @@ func RunIntercept(args []string, cfg *config.Config) {
 		os.Exit(1)
 	}
 
-	p, err := proxy.New(*target, s, cfg)
+	p, err := proxy.New(*target, s, cfg, *insecure)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "probe: %v\n", err)
 		s.Close() //nolint:errcheck
@@ -68,7 +69,15 @@ func RunIntercept(args []string, cfg *config.Config) {
 	}
 
 	addr := fmt.Sprintf("%s:%d", *bind, *port)
-	fmt.Printf("probe: intercepting → %s  listening on %s  db: %s\n", *target, addr, dbPath)
+	probeURL := fmt.Sprintf("http://%s:%d", "localhost", *port)
+	fmt.Printf("\n  Intercepting → %s\n", *target)
+	fmt.Printf("  Listening on  %s\n", addr)
+	fmt.Printf("  DB            %s\n", dbPath)
+	if *insecure {
+		fmt.Printf("  TLS           insecure (certificate verification skipped)\n")
+	}
+	fmt.Printf("\n  Point your client at: %s\n", probeURL)
+	fmt.Printf("  (replace %s with %s in your client config)\n\n", *target, probeURL)
 
 	srv := &http.Server{
 		Addr:    addr,

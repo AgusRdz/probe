@@ -257,6 +257,9 @@ func merge(base, override *Config) {
 	if override.Output.JSONIndent != 0 {
 		base.Output.JSONIndent = override.Output.JSONIndent
 	}
+	if override.Output.Editor != "" {
+		base.Output.Editor = override.Output.Editor
+	}
 
 	// List
 	if override.List.Columns != "" {

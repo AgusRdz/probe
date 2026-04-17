@@ -116,11 +116,21 @@ func PrintTable(w io.Writer, endpoints []store.Endpoint, statusCodes map[int64][
 			fileVal = filepath.Base(ep.SourceFile) + ":" + strconv.Itoa(ep.SourceLine)
 		}
 
+		// Notes are only meaningful when the coverage column is visible.
 		var note string
-		if conf < 0.30 && ep.CallCount > 0 {
-			note = "← low coverage"
-		} else if ep.CallCount == 0 {
-			note = "← not yet seen"
+		hasCoverageCol := false
+		for _, c := range activeCols {
+			if c == ColCoverage || c == ColConfidence {
+				hasCoverageCol = true
+				break
+			}
+		}
+		if hasCoverageCol {
+			if conf < 0.30 && ep.CallCount > 0 {
+				note = "← low coverage"
+			} else if ep.CallCount == 0 {
+				note = "← not yet seen"
+			}
 		}
 
 		r := rowData{
