@@ -109,7 +109,7 @@ func Default() *Config {
 			JSONIndent: 2,
 		},
 		List: ListConfig{
-			Columns: "method,path,source,file,calls,confidence",
+			Columns: "method,path,source,file,calls,coverage",
 		},
 		PathOverrides: []PathOverride{},
 	}
@@ -119,6 +119,28 @@ func Default() *Config {
 func Path() string {
 	home, _ := os.UserHomeDir()
 	return filepath.Join(home, ".config", "probe", "config.yml")
+}
+
+// ProjectPath returns the path of the nearest .probe.yml walking up from cwd,
+// or ".probe.yml" in cwd if none exists yet.
+func ProjectPath() string {
+	cwd, err := os.Getwd()
+	if err != nil {
+		return ".probe.yml"
+	}
+	dir := cwd
+	for {
+		p := filepath.Join(dir, ".probe.yml")
+		if _, err := os.Stat(p); err == nil {
+			return p
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			break
+		}
+		dir = parent
+	}
+	return filepath.Join(cwd, ".probe.yml")
 }
 
 // Load returns a *Config with defaults, overlaid by the global config (if

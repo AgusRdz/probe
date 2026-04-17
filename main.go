@@ -41,6 +41,8 @@ func main() {
 		cmd.RunClear(os.Args[2:], cfg)
 	case "scan":
 		cmd.RunScan(os.Args[2:], cfg)
+	case "config":
+		cmd.RunConfig(os.Args[2:])
 	case "update":
 		cmd.RunUpdate(os.Args[2:])
 	case "version", "--version", "-v":
@@ -119,6 +121,8 @@ func printHelp() {
 	b.WriteString("\n")
 
 	b.WriteString(section("Other"))
+	b.WriteString(row("config show", "Show config file paths and edit instructions"))
+	b.WriteString(row("config edit "+flag("[global|project]"), "Open config in $EDITOR (creates file if missing)"))
 	b.WriteString(row("update", "Download and install the latest release"))
 	b.WriteString(row("version", "Show version"))
 	b.WriteString(row("help [command]", "Show this help or command help"))
@@ -158,6 +162,8 @@ func printCommandHelp(command string) {
 		cmd.RunClear([]string{"--help"}, &config.Config{})
 	case "scan":
 		cmd.RunScan([]string{"--help"}, &config.Config{})
+	case "config":
+		cmd.RunConfig([]string{"show"})
 	default:
 		fmt.Fprintf(os.Stderr, "probe: unknown command %q\n\nRun 'probe help' for usage.\n", command)
 		os.Exit(1)
