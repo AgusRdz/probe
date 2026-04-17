@@ -1,8 +1,13 @@
-# probe
+<p align="center">
+  <img src="assets/logo.svg" width="80" alt="probe logo"/>
+</p>
 
-Transparent reverse proxy that discovers and documents API endpoints by observing real traffic.
+<h1 align="center">probe</h1>
 
-No code changes to target services. No OpenAPI spec required. Pure observation.
+<p align="center">
+  Transparent reverse proxy that discovers and documents API endpoints by observing real traffic.<br/>
+  No code changes to target services. No OpenAPI spec required. Pure observation.
+</p>
 
 ---
 
@@ -358,15 +363,3 @@ list:
 | C# | ASP.NET Core MVC, ASP.NET Minimal API, ASP.NET Web API (.NET Framework 4.x) |
 
 Supports both .NET Core (`[Route]`, `IActionResult`) and .NET Framework (`[RoutePrefix]`, `IHttpActionResult`) attribute routing styles, including conventional routing via `MapHttpRoute` and `[ActionName]`.
-
----
-
-## Pairs with
-
-[spec](https://github.com/AgusRdz/spec) — mock server that serves a spec produced by probe.
-
-```sh
-probe intercept --target http://localhost:3000  # observe
-probe export --out api.yaml                     # export
-spec serve api.yaml                             # mock
-```
