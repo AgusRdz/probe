@@ -119,6 +119,30 @@ probe export --postman --title "Users API"
 probe export --postman --min-calls 1
 ```
 
+### Auto-merge — updating existing exports
+
+When `--out` points to an existing file (or directory for Bruno), probe merges instead of overwriting:
+
+- **OpenAPI / Swagger / JSON** — add-only: missing path+method combinations are added; existing operations are never touched (your edits, examples, and descriptions are preserved)
+- **Postman** — same key matching (`METHOD /path`); conflicts (same endpoint, different body) are shown interactively; resolve per-item as keep / replace / merge
+- **Bruno** — missing `.bru` files are added; existing files are left alone unless changed
+- **curl / HTTPie scripts** — missing endpoint blocks are appended; existing stubs are preserved
+
+```sh
+# First export — creates the file
+probe export --postman --out ./api.postman_collection.json
+
+# Later — probe detects the file and merges automatically
+probe export --postman --out ./api.postman_collection.json
+
+# CI mode — no prompts, conflicts default to keep
+probe export --postman --out ./api.postman_collection.json --no-interactive
+```
+
+Merge applies to all formats — you never lose hand-edited examples, scripts, or custom fields.
+
+---
+
 ### What's included in Postman exports
 
 probe builds Postman collections from observed traffic — the more traffic you send through `probe intercept`, the richer the output:
@@ -156,6 +180,44 @@ With `output_dir` set, `probe export --postman` writes to `./exports/my-api.post
 >   output_dir: "C:\\Users\\me\\exports" # ✓ absolute with escaped backslashes
 >   output_dir: C:\Users\me\exports    # ✗ will fail — unquoted backslashes
 > ```
+
+---
+
+## Request variants
+
+Some endpoints behave differently depending on who calls them — authenticated vs anonymous, different body shapes, etc. probe automatically detects these patterns and groups them as **variants**.
+
+Two calls are the same variant if they share the same auth scheme and the same top-level request body fields.
+
+```sh
+# See variants for an endpoint
+probe show POST /api/login
+```
+
+Output includes a variants table when multiple shapes are detected:
+
+```
+VARIANTS
+  FINGERPRINT                             LABEL           CALLS
+  auth:none|body:email,password           password-login  42
+  auth:none|body:token                    token-login      7
+```
+
+Variants are exported too:
+- **OpenAPI** — `x-variants` extension on each operation with per-variant field confidence
+- **Postman** — one collection item per variant, named `POST /api/login (password-login)`
+
+### Labelling variants
+
+probe auto-labels common patterns (`authenticated`, `password-login`, `token-login`, etc.). For custom labels:
+
+```sh
+# Find the fingerprint
+probe show POST /api/login
+
+# Apply a label
+probe annotate "POST /api/login" --variant-fingerprint "auth:none|body:email,password" --variant-label "email-login"
+```
 
 ---
 
@@ -243,7 +305,7 @@ probe intercept --target http://localhost:3002 --port 4002
 | `show <METHOD> <PATH>` | Full detail: schema + coverage breakdown |
 | `export` | Export as OpenAPI 3.x YAML |
 | `scan <dir>` | Static analysis — extract routes from source code |
-| `annotate "METHOD /path"` | Add description, tags, or path override |
+| `annotate "METHOD /path"` | Add description, tags, path override, or variant label |
 | `stats` | Show endpoint count summary |
 | `clear` | Delete all observations |
 | `init` | Create `.probe.yml` with all settings as commented examples |
@@ -267,6 +329,7 @@ probe intercept --target http://localhost:3002 --port 4002
 | `file` | Source file and line number (scan only, e.g. `UsersController.cs:42`) |
 | `calls` | Number of observed traffic calls |
 | `coverage` | Schema evidence bar — how well-documented this endpoint is. Green bar = strong evidence. Formula: `min(calls/30, 1) × source_quality` where scan=35%, scan+obs=60%, observed=100%. Grows as you send more traffic through `probe intercept`. |
+| `auth` | Auth schemes seen on this endpoint — `bearer`, `basic`, `apikey`, `none` |
 | `protocol` | `rest` / `graphql` / `grpc` |
 | `status` | Observed HTTP status codes |
 | `framework` | Detected framework (e.g. `aspnet-mvc`, `nestjs`, `spring`) |
