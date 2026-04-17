@@ -7,10 +7,13 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"encoding/pem"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
+	"os/exec"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"time"
@@ -87,12 +90,20 @@ func RunUpdate(currentVersion string) error {
 	fmt.Println("Signature verified.")
 
 	if err := atomicReplace(binaryData); err != nil {
+		if errors.Is(err, errUpdateDeferred) {
+			fmt.Printf("probe %s will be active after this process exits.\n", latest)
+			return nil
+		}
 		return fmt.Errorf("update: failed to replace binary: %w", err)
 	}
 
 	fmt.Printf("probe updated to %s.\n", latest)
 	return nil
 }
+
+// errUpdateDeferred signals that the binary replacement was handed off to a
+// background script and will complete after the current process exits.
+var errUpdateDeferred = errors.New("update deferred to background script")
 
 func parsePublicKey(pemData []byte) (ed25519.PublicKey, error) {
 	block, _ := pem.Decode(pemData)
@@ -154,10 +165,68 @@ func atomicReplace(data []byte) error {
 	}
 	if err := os.Rename(tmp, exe); err != nil {
 		os.Rename(old, exe) //nolint:errcheck — restore original
-		os.Remove(tmp)      //nolint:errcheck
+		// Rename dance failed (e.g. AV hold, permission race). On Windows, fall
+		// back to a background PowerShell script that completes the swap after
+		// this process exits — so the user never has to do anything manually.
+		if runtime.GOOS == "windows" {
+			if serr := scheduleWindowsReplace(exe, tmp, data); serr == nil {
+				return errUpdateDeferred
+			}
+		}
+		os.Remove(tmp) //nolint:errcheck
 		return err
 	}
 	os.Remove(old) //nolint:errcheck — best-effort cleanup
+	return nil
+}
+
+// scheduleWindowsReplace writes a PowerShell script to %TEMP% that waits for
+// the current PID to exit, then moves tmp into exe, and launches it detached.
+// data is re-written to tmp in case the caller already deleted it.
+func scheduleWindowsReplace(exe, tmp string, data []byte) error {
+	// Re-write tmp in case it was removed before we got here.
+	if err := os.WriteFile(tmp, data, 0755); err != nil { //nolint:gosec
+		return err
+	}
+
+	pid := os.Getpid()
+	old := exe + ".old"
+	script := fmt.Sprintf(`
+$pid  = %d
+$tmp  = '%s'
+$exe  = '%s'
+$old  = '%s'
+# Wait for the probe process to release the file lock.
+while (Get-Process -Id $pid -ErrorAction SilentlyContinue) {
+    Start-Sleep -Milliseconds 100
+}
+Start-Sleep -Milliseconds 200
+try {
+    Remove-Item $old -Force -ErrorAction SilentlyContinue
+    Rename-Item -Path $exe -NewName $old -Force -ErrorAction SilentlyContinue
+    Move-Item   -Path $tmp -Destination $exe -Force
+    Remove-Item $old -Force -ErrorAction SilentlyContinue
+} catch {
+    Write-Error "probe background update failed: $_"
+}
+Remove-Item -Path $PSCommandPath -Force -ErrorAction SilentlyContinue
+`, pid, tmp, exe, old)
+
+	scriptPath := filepath.Join(os.TempDir(), "probe-update.ps1")
+	if err := os.WriteFile(scriptPath, []byte(script), 0700); err != nil { //nolint:gosec
+		return err
+	}
+
+	cmd := exec.Command("powershell.exe",
+		"-NonInteractive", "-WindowStyle", "Hidden",
+		"-ExecutionPolicy", "Bypass",
+		"-File", scriptPath,
+	)
+	if err := cmd.Start(); err != nil {
+		os.Remove(scriptPath) //nolint:errcheck
+		return err
+	}
+	cmd.Process.Release() //nolint:errcheck — detach; script outlives this process
 	return nil
 }
 
