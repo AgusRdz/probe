@@ -1,18 +1,16 @@
 package cmd
 
 import (
-	"bytes"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
-	"strings"
 
 	"github.com/AgusRdz/probe/config"
 )
 
-// RunConfig runs `probe config [show|edit [global|project]]`.
+// RunConfig runs `probe config [show|edit]`.
 func RunConfig(args []string, cfg *config.Config) {
 	sub := "show"
 	if len(args) > 0 {
@@ -23,13 +21,15 @@ func RunConfig(args []string, cfg *config.Config) {
 	case "show":
 		configShow(cfg)
 	case "edit":
-		target := "project"
-		if len(args) > 1 {
-			target = args[1]
+		global := false
+		for _, a := range args[1:] {
+			if a == "--global" {
+				global = true
+			}
 		}
-		configEdit(target, cfg)
+		configEdit(global, cfg)
 	default:
-		fmt.Fprintf(os.Stderr, "probe config: unknown subcommand %q\n\nusage: probe config [show|edit [global|project]]\n", sub)
+		fmt.Fprintf(os.Stderr, "probe config: unknown subcommand %q\n\nusage:\n  probe config show\n  probe config edit [--global]\n", sub)
 		os.Exit(1)
 	}
 }
@@ -61,104 +61,29 @@ func configShow(cfg *config.Config) {
 	}
 	fmt.Println()
 	fmt.Println("To edit:")
-	fmt.Println("  probe config edit          # project (.probe.yml in cwd)")
-	fmt.Println("  probe config edit global   # global (~/.config/probe/config.yml)")
+	fmt.Println("  probe config edit           # project (.probe.yml)")
+	fmt.Println("  probe config edit --global  # global (~/.config/probe/config.yml)")
+	fmt.Println()
+	fmt.Println("To create / refresh:")
+	fmt.Println("  probe init                  # project config")
+	fmt.Println("  probe init --global         # global config")
 }
 
-// configSection is a top-level config block with its YAML key and commented template.
-type configSection struct {
-	key      string // top-level YAML key, e.g. "proxy"
-	template string // commented-out template block
-}
-
-// configSections defines every supported top-level section in order.
-// A section is appended to an existing config only when its key is absent.
-var configSections = []configSection{
-	{"proxy", `# proxy:
-#   port: 4000
-#   target: http://localhost:3001
-#   bind: 127.0.0.1
-#   filter: /api
-#   ignore:
-#     - /health
-#     - /metrics
-#   body_size_limit: 1048576   # 1MB
-`},
-	{"inference", `# inference:
-#   path_normalization_threshold: 3    # calls before a segment becomes {id}
-#   confidence_threshold: 0.9          # required vs optional field cutoff
-#   max_xml_depth: 20
-`},
-	{"export", `# export:
-#   default_format: openapi
-#   min_calls: 0            # 0 = include scan-only; 1 = observed traffic only
-#   info_title: "My API"
-#   info_version: "1.0.0"
-#   output_dir: ./exports   # all formats go here, auto-named (<dir>.<ext>)
-#   outputs:                # per-format overrides — wins over output_dir
-#     openapi: api.yaml
-#     json:    api.json
-#     swagger: swagger.yaml
-#     postman: collection.json
-#     curl:    api.sh
-#     httpie:  api-httpie.sh
-#     bruno:   ./my-api-bruno
-`},
-	{"list", `# list:
-#   columns: method,path,source,file,calls,coverage
-#   # available: method path source file calls coverage protocol status framework
-`},
-	{"output", `# output:
-#   no_color: false
-#   editor: code       # editor for 'probe config edit' (e.g. code, vim, nano, notepad++)
-#                      # also settable via $PROBE_EDITOR env var
-`},
-	{"path_overrides", `# path_overrides:
-#   - pattern: "/api/v*/users/me"
-#     keep_as: "/api/v{version}/users/me"
-`},
-}
-
-// configTemplate is the full file written when creating a new config from scratch.
-var configTemplate = func() string {
-	var b strings.Builder
-	b.WriteString("# probe configuration\n")
-	b.WriteString("# Full reference: https://github.com/AgusRdz/probe\n")
-	for _, s := range configSections {
-		b.WriteByte('\n')
-		b.WriteString(s.template)
-	}
-	return b.String()
-}()
-
-func configEdit(target string, cfg *config.Config) {
+func configEdit(global bool, cfg *config.Config) {
 	var path string
-	switch target {
-	case "global":
+	if global {
 		path = config.Path()
-	case "project":
+	} else {
 		path = config.ProjectPath()
-	default:
-		fmt.Fprintf(os.Stderr, "probe config edit: unknown target %q — use 'global' or 'project'\n", target)
-		os.Exit(1)
 	}
 
-	// Create file with full template if it doesn't exist yet.
+	// Create from template if missing; otherwise just open.
 	if _, err := os.Stat(path); os.IsNotExist(err) {
-		if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
-			fmt.Fprintf(os.Stderr, "probe config: create dir: %v\n", err)
-			os.Exit(1)
-		}
-		if err := os.WriteFile(path, []byte(configTemplate), 0600); err != nil {
-			fmt.Fprintf(os.Stderr, "probe config: create file: %v\n", err)
+		if err := writeConfigTemplate(path); err != nil {
+			fmt.Fprintf(os.Stderr, "probe config: %v\n", err)
 			os.Exit(1)
 		}
 		fmt.Printf("Created %s\n", path)
-	} else {
-		// File exists — append any sections that are entirely absent.
-		if added := appendMissingSections(path); added > 0 {
-			fmt.Printf("Added %d new setting(s) to %s\n", added, path)
-		}
 	}
 
 	editor := resolveEditor(cfg)
@@ -176,39 +101,65 @@ func configEdit(target string, cfg *config.Config) {
 	}
 }
 
-// appendMissingSections reads the existing config file and appends any top-level
-// sections whose key does not appear anywhere in the file (even as a comment).
-// Returns the number of sections appended.
-func appendMissingSections(path string) int {
-	existing, err := os.ReadFile(path)
-	if err != nil {
-		return 0
+// writeConfigTemplate creates the directory and writes the full template to path.
+func writeConfigTemplate(path string) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+		return fmt.Errorf("create dir: %w", err)
 	}
-
-	var missing []configSection
-	for _, s := range configSections {
-		// A section is considered present if its key appears anywhere in the file
-		// (e.g. "proxy:", "# proxy:", "  proxy:").
-		if !bytes.Contains(existing, []byte(s.key+":")) {
-			missing = append(missing, s)
-		}
-	}
-	if len(missing) == 0 {
-		return 0
-	}
-
-	f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0600)
-	if err != nil {
-		return 0
-	}
-	defer f.Close() //nolint:errcheck
-
-	fmt.Fprintf(f, "\n# --- added by probe (new settings) ---\n")
-	for _, s := range missing {
-		fmt.Fprintf(f, "\n%s", s.template)
-	}
-	return len(missing)
+	return os.WriteFile(path, []byte(ConfigTemplate), 0600)
 }
+
+// ConfigTemplate is the canonical reference config written by probe init / probe config edit.
+// Exported so probe init can reuse it.
+const ConfigTemplate = `# probe configuration
+# Full reference: https://github.com/AgusRdz/probe
+#
+# Run 'probe init' to refresh this file with any new settings added in later versions.
+
+# proxy:
+#   port: 4000
+#   target: http://localhost:3001
+#   bind: 127.0.0.1
+#   filter: /api
+#   ignore:
+#     - /health
+#     - /metrics
+#   body_size_limit: 1048576   # 1MB
+
+# inference:
+#   path_normalization_threshold: 3    # calls before a segment becomes {id}
+#   confidence_threshold: 0.9          # required vs optional field cutoff
+#   max_xml_depth: 20
+
+# export:
+#   default_format: openapi
+#   min_calls: 0            # 0 = include scan-only; 1 = observed traffic only
+#   info_title: "My API"
+#   info_version: "1.0.0"
+#   output_dir: ./exports   # all formats land here, auto-named (<dir>.<ext>)
+#                           # Windows: use ./exports or C:/path/to/dir (forward slashes)
+#   outputs:                # per-format overrides — wins over output_dir
+#     openapi: api.yaml
+#     json:    api.json
+#     swagger: swagger.yaml
+#     postman: collection.json
+#     curl:    api.sh
+#     httpie:  api-httpie.sh
+#     bruno:   ./my-api-bruno
+
+# list:
+#   columns: method,path,source,file,calls,coverage
+#   # available: method path source file calls coverage protocol status framework
+
+# output:
+#   no_color: false
+#   editor: code       # editor for 'probe config edit' (e.g. code, vim, nano, notepad++)
+#                      # also settable via $PROBE_EDITOR env var
+
+# path_overrides:
+#   - pattern: "/api/v*/users/me"
+#     keep_as: "/api/v{version}/users/me"
+`
 
 // resolveEditor returns the editor to use:
 // $PROBE_EDITOR → output.editor in config → platform default (notepad / nano / vi).

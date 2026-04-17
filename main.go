@@ -41,6 +41,8 @@ func main() {
 		cmd.RunClear(os.Args[2:], cfg)
 	case "scan":
 		cmd.RunScan(os.Args[2:], cfg)
+	case "init":
+		cmd.RunInit(os.Args[2:])
 	case "config":
 		cmd.RunConfig(os.Args[2:], cfg)
 	case "update":
@@ -122,8 +124,11 @@ func printHelp() {
 	b.WriteString("\n")
 
 	b.WriteString(section("Other"))
-	b.WriteString(row("config show", "Show config file paths and edit instructions"))
-	b.WriteString(row("config edit "+flag("[global|project]"), "Open config in $EDITOR (creates file if missing)"))
+	b.WriteString(row("init", "Create .probe.yml with all settings as commented examples"))
+	b.WriteString(row("  "+flag("--global"), "Init global config instead (~/.config/probe/config.yml)"))
+	b.WriteString(row("config show", "Show config paths and active editor"))
+	b.WriteString(row("config edit", "Open project config in editor (creates if missing)"))
+	b.WriteString(row("config edit "+flag("--global"), "Open global config in editor"))
 	b.WriteString(row("update", "Download and install the latest release"))
 	b.WriteString(row("version", "Show version"))
 	b.WriteString(row("help [command]", "Show this help or command help"))
@@ -242,6 +247,8 @@ func printCommandHelp(command string) {
 		cmd.RunClear([]string{"--help"}, &config.Config{})
 	case "scan":
 		cmd.RunScan([]string{"--help"}, &config.Config{})
+	case "init":
+		cmd.RunInit([]string{"--help"})
 	case "config":
 		cmd.RunConfig([]string{"show"}, &config.Config{})
 	default:
