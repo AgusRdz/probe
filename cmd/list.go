@@ -26,9 +26,18 @@ func RunList(args []string, cfg *config.Config) {
 	source := fs.String("source", "", `filter by source: "scan", "observed", "scan+obs"`)
 	protocol := fs.String("protocol", "", `filter by protocol: "rest", "graphql", "grpc"`)
 	db := fs.String("db", "", "override DB path")
-	cols := fs.String("cols", "", `columns to display, comma-separated (default from config)
-    available: method, path, source, file, calls, confidence, protocol, status, framework
-    example:   --cols method,path,source,file`)
+	cols := fs.String("cols", "", `columns to display, comma-separated (default from config or: method,path,source,file,calls,coverage)
+    method     HTTP verb (GET, POST, …)
+    path       URL pattern with {param} placeholders
+    source     where probe learned about the endpoint: scan / observed / scan+obs
+    file       source file and line number (scan only)
+    calls      number of observed traffic calls
+    coverage   schema evidence strength — green bar shows how well this endpoint is documented
+               (based on call count × source quality; scan-only starts at 35%, grows with traffic)
+    protocol   rest / graphql / grpc
+    status     observed HTTP status codes
+    framework  detected framework (e.g. aspnet-mvc, nestjs)
+    example:   --cols method,path,source,file,calls`)
 
 	if err := fs.Parse(args); err != nil {
 		os.Exit(1)

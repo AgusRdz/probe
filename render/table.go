@@ -13,19 +13,20 @@ import (
 
 // Column name constants.
 const (
-	ColMethod     = "method"
-	ColPath       = "path"
-	ColSource     = "source"
-	ColFile       = "file" // basename:line from SourceFile/SourceLine
-	ColCalls      = "calls"
-	ColConfidence = "confidence"
-	ColProtocol   = "protocol"
-	ColStatus     = "status"
-	ColFramework  = "framework"
+	ColMethod    = "method"
+	ColPath      = "path"
+	ColSource    = "source"
+	ColFile      = "file" // basename:line from SourceFile/SourceLine
+	ColCalls     = "calls"
+	ColCoverage  = "coverage"   // schema coverage bar — evidence strength (call count × source quality)
+	ColConfidence = "confidence" // alias for coverage (backward compat)
+	ColProtocol  = "protocol"
+	ColStatus    = "status"
+	ColFramework = "framework"
 )
 
 // DefaultColumns is the column list used when none is configured.
-var DefaultColumns = []string{ColMethod, ColPath, ColSource, ColFile, ColCalls, ColConfidence}
+var DefaultColumns = []string{ColMethod, ColPath, ColSource, ColFile, ColCalls, ColCoverage}
 
 // TableOptions controls table rendering.
 type TableOptions struct {
@@ -67,8 +68,8 @@ func PrintTable(w io.Writer, endpoints []store.Endpoint, statusCodes map[int64][
 			return "FILE"
 		case ColCalls:
 			return "CALLS"
-		case ColConfidence:
-			return "CONFIDENCE"
+		case ColCoverage, ColConfidence:
+			return "COVERAGE"
 		case ColProtocol:
 			return "PROTOCOL"
 		case ColStatus:
@@ -117,7 +118,7 @@ func PrintTable(w io.Writer, endpoints []store.Endpoint, statusCodes map[int64][
 
 		var note string
 		if conf < 0.30 && ep.CallCount > 0 {
-			note = "← low confidence"
+			note = "← low coverage"
 		} else if ep.CallCount == 0 {
 			note = "← not yet seen"
 		}
@@ -150,7 +151,7 @@ func PrintTable(w io.Writer, endpoints []store.Endpoint, statusCodes map[int64][
 				return len(r.file)
 			case ColCalls:
 				return len(r.calls)
-			case ColConfidence:
+			case ColCoverage, ColConfidence:
 				return len(r.conf)
 			case ColProtocol:
 				return len(r.protocol)
@@ -202,7 +203,7 @@ func PrintTable(w io.Writer, endpoints []store.Endpoint, statusCodes map[int64][
 				colored := colorizeSource(r.source, opts.NoColor)
 				padding := strings.Repeat(" ", w-len(r.source))
 				lbuf.WriteString(colored + padding)
-			case ColConfidence:
+			case ColCoverage, ColConfidence:
 				// Color with ANSI, pad based on plain width.
 				colored := confidenceBarColored(r.confVal, opts.NoColor)
 				padding := strings.Repeat(" ", w-len(r.conf))

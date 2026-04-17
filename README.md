@@ -8,7 +8,7 @@ No code changes to target services. No OpenAPI spec required. Pure observation.
 
 ## How it works
 
-`probe intercept` sits between your client and server. Every request/response passes through unchanged. probe infers field types, tracks confidence across calls, and normalises path parameters — then lets you export everything as an OpenAPI spec.
+`probe intercept` sits between your client and server. Every request/response passes through unchanged. probe infers field types, tracks schema coverage across calls, and normalises path parameters — then lets you export everything as an OpenAPI spec.
 
 ```
 client → probe intercept → your API server
@@ -41,6 +41,9 @@ probe intercept --target http://localhost:3000
 # List discovered endpoints
 probe list
 
+# Choose which columns to show
+probe list --cols method,path,source,file,calls
+
 # Inspect one endpoint
 probe show GET /users/{id}
 
@@ -62,7 +65,7 @@ probe update
 |---|---|
 | `intercept --target <url>` | Proxy traffic and capture endpoint schemas |
 | `list` | List all discovered endpoints |
-| `show <METHOD> <PATH>` | Full detail: schema + confidence breakdown |
+| `show <METHOD> <PATH>` | Full detail: schema + coverage breakdown |
 | `export` | Export as OpenAPI 3.x YAML |
 | `scan <dir>` | Static analysis — extract routes from source code |
 | `annotate "METHOD /path"` | Add description, tags, or path override |
@@ -70,12 +73,43 @@ probe update
 | `clear` | Delete all observations |
 | `update` | Download and install the latest release |
 | `version` | Show version |
+| `help [command]` | Show help for a command |
+
+---
+
+## probe list — columns
+
+`probe list` shows a configurable set of columns. Default: `method, path, source, file, calls, coverage`.
+
+| Column | Description |
+|---|---|
+| `method` | HTTP verb (GET, POST, PUT, …) |
+| `path` | URL pattern with `{param}` placeholders |
+| `source` | Where probe learned about the endpoint: `scan` / `observed` / `scan+obs` |
+| `file` | Source file and line number (scan only, e.g. `UsersController.cs:42`) |
+| `calls` | Number of observed traffic calls |
+| `coverage` | Schema evidence bar — how well-documented this endpoint is. Green bar = strong evidence. Formula: `min(calls/30, 1) × source_quality` where scan=35%, scan+obs=60%, observed=100%. Grows as you send more traffic through `probe intercept`. |
+| `protocol` | `rest` / `graphql` / `grpc` |
+| `status` | Observed HTTP status codes |
+| `framework` | Detected framework (e.g. `aspnet-mvc`, `nestjs`, `spring`) |
+
+**Select columns:**
+```sh
+probe list --cols method,path,file,calls
+```
+
+**Persist via config:**
+```yaml
+# .probe.yml
+list:
+  columns: method,path,source,file,calls
+```
 
 ---
 
 ## Configuration
 
-Two-level config — global overrides are project-local:
+Two-level config — project overrides global:
 
 **Global:** `~/.config/probe/config.yml`
 **Project:** `.probe.yml` (walked up from cwd)
@@ -93,6 +127,9 @@ proxy:
 inference:
   path_normalization_threshold: 3
   confidence_threshold: 0.9
+
+list:
+  columns: method,path,source,file,calls,coverage
 ```
 
 ---
@@ -101,17 +138,17 @@ inference:
 
 | Language | Frameworks |
 |---|---|
-| JavaScript / TypeScript | Express, NestJS, Next.js |
+| JavaScript / TypeScript | Express, NestJS, Next.js, Fastify, Koa, Hapi |
 | Python | FastAPI, Flask, Django |
 | Go | Gin, Echo, Fiber, Chi, stdlib |
-| Ruby | Rails |
-| PHP | Laravel |
+| Ruby | Rails, Sinatra |
+| PHP | Laravel, Symfony, CodeIgniter, Zend / Laminas |
 | Java | Spring MVC |
 | Kotlin | Ktor |
 | Rust | Actix-web, Axum |
 | C# | ASP.NET Core MVC, ASP.NET Minimal API, ASP.NET Web API (.NET Framework 4.x) |
 
-Supports both .NET Core (`[Route]`, `IActionResult`) and .NET Framework (`[RoutePrefix]`, `IHttpActionResult`) attribute routing styles, including flexible decorator ordering.
+Supports both .NET Core (`[Route]`, `IActionResult`) and .NET Framework (`[RoutePrefix]`, `IHttpActionResult`) attribute routing styles, including conventional routing via `MapHttpRoute` and `[ActionName]`.
 
 ---
 
