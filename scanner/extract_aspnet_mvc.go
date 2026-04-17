@@ -178,7 +178,21 @@ func extractASPNetMVCFile(path string, schemas map[string]*observer.Schema, conv
 		}
 	}
 	classPrefixLine := -1
+	firstMethodLine := -1
 	for idx, line := range lines {
+		t := strings.TrimSpace(line)
+		if strings.HasPrefix(t, "//") {
+			continue
+		}
+		if reCSActionMethod.MatchString(t) {
+			firstMethodLine = idx
+			break
+		}
+	}
+	for idx, line := range lines {
+		if firstMethodLine >= 0 && idx >= firstMethodLine {
+			break // stop at first method — everything after is method-level
+		}
 		t := strings.TrimSpace(line)
 		if strings.HasPrefix(t, "//") {
 			continue // skip commented-out attributes
@@ -195,7 +209,6 @@ func extractASPNetMVCFile(path string, schemas map[string]*observer.Schema, conv
 				strings.TrimPrefix(controllerBasePath, "/"), 1)
 			classPrefix = "/" + strings.TrimLeft(raw, "/")
 			classPrefixLine = idx
-			break
 		}
 		if reCSAuthorize.MatchString(t) {
 			classRequiresAuth = true

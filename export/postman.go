@@ -139,8 +139,9 @@ func GeneratePostman(s StoreReader, opts ExportOptions) (*PostmanCollection, err
 		}
 
 		// Add Authorization header for auth-required endpoints not already covered
-		// by observed traffic headers.
-		if ep.RequiresAuth {
+		// by observed traffic headers. Skip token-generation paths (login, register,
+		// etc.) — those create tokens and therefore don't consume them.
+		if ep.RequiresAuth && !isTokenGenerationPath(ep.PathPattern) {
 			hasAuth := false
 			for _, h := range headers {
 				if strings.ToLower(h.Key) == "authorization" {
@@ -255,6 +256,29 @@ func headerPlaceholder(name string) string {
 		slug := strings.NewReplacer("-", "_", " ", "_").Replace(lower)
 		return "{{" + slug + "}}"
 	}
+}
+
+// tokenGenerationSegments are path segments that identify endpoints which create
+// tokens rather than consume them. Auth headers are never injected for these.
+var tokenGenerationSegments = map[string]bool{
+	"login": true, "signin": true, "sign-in": true,
+	"register": true, "signup": true, "sign-up": true,
+	"token": true, "refresh": true, "oauth": true,
+	"authorize": true, "callback": true, "exchange": true,
+}
+
+// isTokenGenerationPath returns true if the last meaningful path segment looks
+// like an authentication/token-generation endpoint.
+func isTokenGenerationPath(pathPattern string) bool {
+	parts := strings.Split(strings.ToLower(strings.Trim(pathPattern, "/")), "/")
+	for i := len(parts) - 1; i >= 0; i-- {
+		seg := parts[i]
+		if seg == "" || (strings.HasPrefix(seg, "{") && strings.HasSuffix(seg, "}")) {
+			continue // skip empty and param segments, look further back
+		}
+		return tokenGenerationSegments[seg]
+	}
+	return false
 }
 
 // schemaToJSONTemplate recursively converts an OpenAPISchema into a Go value
