@@ -60,6 +60,22 @@ type FieldConfidenceRow struct {
 	TypeJSON   string // raw JSON of observer.Schema
 }
 
+// HeaderRow holds aggregated data for a single observed request header.
+type HeaderRow struct {
+	EndpointID int64
+	HeaderName string
+	SeenCount  int
+	TotalCalls int
+}
+
+// QueryParamRow holds aggregated data for a single observed query parameter.
+type QueryParamRow struct {
+	EndpointID int64
+	ParamName  string
+	SeenCount  int
+	TotalCalls int
+}
+
 // Open opens (or creates) a SQLite DB at path, applies PRAGMAs, and runs the schema DDL.
 // If path is empty, the platform default location is used.
 func Open(path string) (*Store, error) {
@@ -225,6 +241,13 @@ func (s *Store) Record(pair observer.CapturedPair, reqSchema, respSchema *observ
 		return err
 	}
 
+	if err := updateHeadersTx(tx, endpointID, pair.ReqHeaders); err != nil {
+		return err
+	}
+	if err := updateQueryParamsTx(tx, endpointID, pair.RawPath); err != nil {
+		return err
+	}
+
 	return tx.Commit()
 }
 
@@ -285,6 +308,52 @@ func (s *Store) GetFieldConfidence(endpointID int64) ([]FieldConfidenceRow, erro
 		if err := rows.Scan(&r.EndpointID, &r.Location, &r.FieldPath,
 			&r.SeenCount, &r.TotalCalls, &r.TypeJSON); err != nil {
 			return nil, fmt.Errorf("store: scan field confidence row: %w", err)
+		}
+		result = append(result, r)
+	}
+	return result, rows.Err()
+}
+
+// GetEndpointHeaders returns all header rows for an endpoint, ordered by header name.
+func (s *Store) GetEndpointHeaders(endpointID int64) ([]HeaderRow, error) {
+	rows, err := s.db.Query(`
+		SELECT endpoint_id, header_name, seen_count, total_calls
+		FROM endpoint_headers
+		WHERE endpoint_id = ?
+		ORDER BY header_name`, endpointID)
+	if err != nil {
+		return nil, fmt.Errorf("store: get endpoint headers: %w", err)
+	}
+	defer rows.Close()
+
+	var result []HeaderRow
+	for rows.Next() {
+		var r HeaderRow
+		if err := rows.Scan(&r.EndpointID, &r.HeaderName, &r.SeenCount, &r.TotalCalls); err != nil {
+			return nil, fmt.Errorf("store: scan header row: %w", err)
+		}
+		result = append(result, r)
+	}
+	return result, rows.Err()
+}
+
+// GetQueryParams returns all query param rows for an endpoint, ordered by param name.
+func (s *Store) GetQueryParams(endpointID int64) ([]QueryParamRow, error) {
+	rows, err := s.db.Query(`
+		SELECT endpoint_id, param_name, seen_count, total_calls
+		FROM query_params
+		WHERE endpoint_id = ?
+		ORDER BY param_name`, endpointID)
+	if err != nil {
+		return nil, fmt.Errorf("store: get query params: %w", err)
+	}
+	defer rows.Close()
+
+	var result []QueryParamRow
+	for rows.Next() {
+		var r QueryParamRow
+		if err := rows.Scan(&r.EndpointID, &r.ParamName, &r.SeenCount, &r.TotalCalls); err != nil {
+			return nil, fmt.Errorf("store: scan query param row: %w", err)
 		}
 		result = append(result, r)
 	}
@@ -781,6 +850,162 @@ func marshalSchema(s *observer.Schema) (string, error) {
 		return "", err
 	}
 	return string(b), nil
+}
+
+// updateHeadersTx upserts endpoint_headers rows for the headers observed in this request.
+// Headers present: seen_count+1, total_calls+1.
+// Headers previously seen but absent: total_calls+1 only.
+func updateHeadersTx(tx *sql.Tx, endpointID int64, headers []string) error {
+	present := make(map[string]bool, len(headers))
+	for _, h := range headers {
+		present[h] = true
+		if _, err := tx.Exec(`
+			INSERT INTO endpoint_headers (endpoint_id, header_name, seen_count, total_calls)
+			VALUES (?, ?, 1, 1)
+			ON CONFLICT(endpoint_id, header_name) DO UPDATE SET
+				seen_count  = seen_count  + 1,
+				total_calls = total_calls + 1`,
+			endpointID, h,
+		); err != nil {
+			return fmt.Errorf("store: upsert endpoint_header %q: %w", h, err)
+		}
+	}
+
+	// Bump total_calls for headers seen before but not in this request.
+	rows, err := tx.Query(
+		`SELECT header_name FROM endpoint_headers WHERE endpoint_id = ?`, endpointID)
+	if err != nil {
+		return fmt.Errorf("store: query existing headers: %w", err)
+	}
+	defer rows.Close()
+	var absent []string
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return fmt.Errorf("store: scan header name: %w", err)
+		}
+		if !present[name] {
+			absent = append(absent, name)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	rows.Close()
+
+	for _, name := range absent {
+		if _, err := tx.Exec(`
+			UPDATE endpoint_headers SET total_calls = total_calls + 1
+			WHERE endpoint_id = ? AND header_name = ?`,
+			endpointID, name,
+		); err != nil {
+			return fmt.Errorf("store: bump header total_calls %q: %w", name, err)
+		}
+	}
+	return nil
+}
+
+// updateQueryParamsTx upserts query_params rows for params observed in this raw path.
+// rawPath is the full RequestURI (e.g. "/api/users?page=1&limit=10").
+func updateQueryParamsTx(tx *sql.Tx, endpointID int64, rawPath string) error {
+	// Extract query string.
+	query := ""
+	if idx := strings.IndexByte(rawPath, '?'); idx >= 0 {
+		query = rawPath[idx+1:]
+	}
+	if query == "" {
+		// No query params in this request — bump total_calls for any previously seen.
+		rows, err := tx.Query(
+			`SELECT param_name FROM query_params WHERE endpoint_id = ?`, endpointID)
+		if err != nil {
+			return fmt.Errorf("store: query existing query params: %w", err)
+		}
+		defer rows.Close()
+		var names []string
+		for rows.Next() {
+			var name string
+			if err := rows.Scan(&name); err != nil {
+				return fmt.Errorf("store: scan param name: %w", err)
+			}
+			names = append(names, name)
+		}
+		if err := rows.Err(); err != nil {
+			return err
+		}
+		rows.Close()
+		for _, name := range names {
+			if _, err := tx.Exec(`
+				UPDATE query_params SET total_calls = total_calls + 1
+				WHERE endpoint_id = ? AND param_name = ?`,
+				endpointID, name,
+			); err != nil {
+				return fmt.Errorf("store: bump query param total_calls %q: %w", name, err)
+			}
+		}
+		return nil
+	}
+
+	// Parse param names (values discarded — never stored).
+	present := map[string]bool{}
+	for _, part := range strings.Split(query, "&") {
+		if part == "" {
+			continue
+		}
+		name := part
+		if idx := strings.IndexByte(part, '='); idx >= 0 {
+			name = part[:idx]
+		}
+		if name == "" {
+			continue
+		}
+		present[name] = true
+	}
+
+	for name := range present {
+		if _, err := tx.Exec(`
+			INSERT INTO query_params (endpoint_id, param_name, seen_count, total_calls)
+			VALUES (?, ?, 1, 1)
+			ON CONFLICT(endpoint_id, param_name) DO UPDATE SET
+				seen_count  = seen_count  + 1,
+				total_calls = total_calls + 1`,
+			endpointID, name,
+		); err != nil {
+			return fmt.Errorf("store: upsert query_param %q: %w", name, err)
+		}
+	}
+
+	// Bump total_calls for previously seen params absent from this request.
+	rows, err := tx.Query(
+		`SELECT param_name FROM query_params WHERE endpoint_id = ?`, endpointID)
+	if err != nil {
+		return fmt.Errorf("store: query existing query params: %w", err)
+	}
+	defer rows.Close()
+	var absent []string
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return fmt.Errorf("store: scan param name: %w", err)
+		}
+		if !present[name] {
+			absent = append(absent, name)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	rows.Close()
+
+	for _, name := range absent {
+		if _, err := tx.Exec(`
+			UPDATE query_params SET total_calls = total_calls + 1
+			WHERE endpoint_id = ? AND param_name = ?`,
+			endpointID, name,
+		); err != nil {
+			return fmt.Errorf("store: bump query param total_calls %q: %w", name, err)
+		}
+	}
+	return nil
 }
 
 // scanEndpoints reads endpoint rows from a *sql.Rows result set.

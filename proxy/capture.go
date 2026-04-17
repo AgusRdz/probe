@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/AgusRdz/probe/observer"
@@ -91,6 +92,7 @@ func wrapCapture(h http.Handler, ch chan<- observer.CapturedPair, bodyLimit int6
 			LatencyMs:       latency,
 			ReqBody:         reqBytes,
 			RespBody:        respBytes,
+			ReqHeaders:      captureRequestHeaders(r.Header),
 		}
 
 		// Non-blocking send: drop observation rather than stall the proxy.
@@ -101,4 +103,40 @@ func wrapCapture(h http.Handler, ch chan<- observer.CapturedPair, bodyLimit int6
 				r.Method, r.URL.Path)
 		}
 	})
+}
+
+// headersToSkip lists request headers that are too noisy or internal to be
+// useful in a Postman collection. These are never tracked.
+var headersToSkip = map[string]bool{
+	"accept-encoding":     true,
+	"connection":          true,
+	"content-length":      true,
+	"host":                true,
+	"keep-alive":          true,
+	"origin":              true,
+	"proxy-authorization": true,
+	"referer":             true,
+	"te":                  true,
+	"trailer":             true,
+	"transfer-encoding":   true,
+	"upgrade":             true,
+	"user-agent":          true,
+}
+
+// captureRequestHeaders returns the canonical names of request headers worth
+// tracking for documentation purposes. Values are never captured.
+// Skips browser-internal, hop-by-hop, and cookie headers.
+func captureRequestHeaders(h http.Header) []string {
+	var names []string
+	for name := range h {
+		lower := strings.ToLower(name)
+		if lower == "cookie" || strings.HasPrefix(lower, "sec-") {
+			continue
+		}
+		if headersToSkip[lower] {
+			continue
+		}
+		names = append(names, http.CanonicalHeaderKey(name))
+	}
+	return names
 }

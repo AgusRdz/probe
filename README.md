@@ -62,6 +62,9 @@ probe export --json       # → my-api.json
 # Override the output path
 probe export --postman --out ./exports/collection.json
 
+# Set the collection/spec title
+probe export --postman --title "Users API"
+
 # Only export endpoints seen in real traffic (skip scan-only)
 probe export --postman --min-calls 1
 
@@ -83,7 +86,7 @@ Seven formats supported. Use shorthand flags for the simplest experience — the
 | `--openapi` | OpenAPI 3.x YAML | `<dir>.yaml` | Works with Swagger UI, Redoc, Stoplight |
 | `--json` | OpenAPI 3.x JSON | `<dir>.json` | Same spec, JSON encoding |
 | `--swagger` | Swagger 2.0 YAML | `<dir>.swagger.yaml` | For tools that only accept Swagger 2.0 |
-| `--postman` | Postman Collection v2.1 | `<dir>.postman_collection.json` | With body templates |
+| `--postman` | Postman Collection v2.1 | `<dir>.postman_collection.json` | Body, headers, query params |
 | `--curl` | curl shell script | `<dir>.sh` | One `curl` command per endpoint |
 | `--httpie` | HTTPie shell script | `<dir>.httpie.sh` | One `http` command per endpoint |
 | `--bruno` | Bruno collection | `<dir>-bruno/` | Directory of `.bru` files |
@@ -96,9 +99,26 @@ probe export --bruno            # → my-api-bruno/
 # Override the path
 probe export --postman --out ./exports/collection.json
 
+# Set collection/spec title
+probe export --postman --title "Users API"
+
 # Only observed traffic (skip scan-only endpoints)
 probe export --postman --min-calls 1
 ```
+
+### What's included in Postman exports
+
+probe builds Postman collections from observed traffic — the more traffic you send through `probe intercept`, the richer the output:
+
+- **Request body** — JSON template with placeholder values inferred from observed schemas
+- **Request headers** — headers seen in real traffic, with safe placeholder values:
+  - `Authorization` → `Bearer {{token}}`
+  - `X-Api-Key` → `{{api_key}}`
+  - `Accept` → `application/json`
+  - Custom `X-Tenant-ID` → `{{x_tenant_id}}`
+  - Noisy/internal headers (`User-Agent`, `Accept-Encoding`, `Cookie`, browser `Sec-*`) are excluded
+- **Query parameters** — param names extracted from observed URLs; values left blank for you to fill in
+- **Path parameters** — `{id}` segments become Postman variables `{{id}}`
 
 ### Config-based output paths
 
@@ -213,6 +233,9 @@ probe intercept --target http://localhost:3002 --port 4002
 | `annotate "METHOD /path"` | Add description, tags, or path override |
 | `stats` | Show endpoint count summary |
 | `clear` | Delete all observations |
+| `init` | Create `.probe.yml` with all settings as commented examples |
+| `config show` | Show config paths and active editor |
+| `config edit` | Open project config in editor |
 | `update` | Download and install the latest release |
 | `version` | Show version |
 | `help [command]` | Show help for a command |
@@ -255,6 +278,50 @@ Two-level config — project overrides global:
 
 **Global:** `~/.config/probe/config.yml`
 **Project:** `.probe.yml` (walked up from cwd)
+
+### Creating and editing config
+
+```sh
+# Create project config (.probe.yml in cwd)
+probe init
+
+# Create global config (~/.config/probe/config.yml)
+probe init --global
+
+# Open project config in editor (creates it if missing)
+probe config edit
+
+# Open global config in editor
+probe config edit --global
+
+# Show config paths and active editor
+probe config show
+```
+
+All settings are commented out by default — uncomment and edit what you need.
+
+### Refreshing config after an upgrade
+
+`probe init` is non-destructive. If the config file already exists, it writes a `.new` file alongside it so you can diff and copy any new settings manually.
+
+```sh
+probe init
+# → Config already exists: .probe.yml
+# → Wrote current template: .probe.yml.new
+
+# Diff on Unix / Git Bash
+diff .probe.yml .probe.yml.new
+
+# Diff in VS Code (works on all platforms)
+code --diff .probe.yml .probe.yml.new
+
+# Diff in PowerShell
+Compare-Object (Get-Content .probe.yml) (Get-Content .probe.yml.new)
+```
+
+Copy any new settings you want into your config, then delete `.probe.yml.new`.
+
+### Config reference
 
 ```yaml
 # .probe.yml

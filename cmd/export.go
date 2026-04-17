@@ -41,6 +41,7 @@ func RunExport(args []string, cfg *config.Config) {
 	out      := fs.String("out", "", "output file or directory path (overrides config and smart default)")
 	minCalls := fs.Int("min-calls", cfg.Export.MinCalls, "only export endpoints with at least N traffic calls (0 = include scan-only too)")
 	db       := fs.String("db", "", "override DB path")
+	title    := fs.String("title", "", "collection/spec title (overrides config info_title)")
 
 	// Shorthand flags — each selects a format and enables smart default output naming.
 	fOpenAPI  := fs.Bool("openapi",  false, "shorthand for --format openapi  (default output: <dir>.yaml)")
@@ -53,6 +54,10 @@ func RunExport(args []string, cfg *config.Config) {
 
 	if err := fs.Parse(args); err != nil {
 		os.Exit(1)
+	}
+
+	if *title != "" {
+		cfg.Export.InfoTitle = *title
 	}
 
 	// Resolve format: shorthand flags take precedence over --format.

@@ -60,4 +60,23 @@ CREATE INDEX IF NOT EXISTS idx_observations_endpoint   ON observations (endpoint
 CREATE INDEX IF NOT EXISTS idx_endpoints_method_path   ON endpoints (method, path_pattern);
 CREATE INDEX IF NOT EXISTS idx_raw_paths_endpoint      ON raw_paths (endpoint_id);
 CREATE INDEX IF NOT EXISTS idx_field_conf_endpoint_loc ON field_confidence (endpoint_id, location);
+
+CREATE TABLE IF NOT EXISTS endpoint_headers (
+    endpoint_id  INTEGER NOT NULL REFERENCES endpoints(id) ON DELETE CASCADE,
+    header_name  TEXT    NOT NULL,
+    seen_count   INTEGER NOT NULL DEFAULT 0,
+    total_calls  INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (endpoint_id, header_name)
+);
+
+CREATE TABLE IF NOT EXISTS query_params (
+    endpoint_id  INTEGER NOT NULL REFERENCES endpoints(id) ON DELETE CASCADE,
+    param_name   TEXT    NOT NULL,
+    seen_count   INTEGER NOT NULL DEFAULT 0,
+    total_calls  INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (endpoint_id, param_name)
+);
+
+CREATE INDEX IF NOT EXISTS idx_endpoint_headers_ep ON endpoint_headers (endpoint_id);
+CREATE INDEX IF NOT EXISTS idx_query_params_ep     ON query_params (endpoint_id);
 `

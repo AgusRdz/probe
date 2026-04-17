@@ -59,6 +59,7 @@ type CapturedPair struct {
 	RespContentType string
 	StatusCode      int
 	LatencyMs       int64
-	ReqBody         []byte // pre-capped at 1MB by capture.go
-	RespBody        []byte // pre-capped at 1MB by capture.go
+	ReqBody         []byte   // pre-capped at 1MB by capture.go
+	RespBody        []byte   // pre-capped at 1MB by capture.go
+	ReqHeaders      []string // request header names to track; values never stored
 }

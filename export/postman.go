@@ -42,10 +42,11 @@ type PostmanHeader struct {
 
 // PostmanURL holds the raw URL and its decomposed parts.
 type PostmanURL struct {
-	Raw      string            `json:"raw"`
-	Host     []string          `json:"host"`
-	Path     []string          `json:"path"`
-	Variable []PostmanVariable `json:"variable,omitempty"`
+	Raw      string              `json:"raw"`
+	Host     []string            `json:"host"`
+	Path     []string            `json:"path"`
+	Variable []PostmanVariable   `json:"variable,omitempty"`
+	Query    []PostmanQueryParam `json:"query,omitempty"`
 }
 
 // PostmanVariable is a path-level variable (path parameter).
@@ -70,6 +71,12 @@ type PostmanBodyOptions struct {
 // PostmanBodyRaw names the language used in the raw body editor.
 type PostmanBodyRaw struct {
 	Language string `json:"language"`
+}
+
+// PostmanQueryParam is a URL query parameter.
+type PostmanQueryParam struct {
+	Key   string `json:"key"`
+	Value string `json:"value"`
 }
 
 const postmanSchemaURL = "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
@@ -104,10 +111,32 @@ func GeneratePostman(s StoreReader, opts ExportOptions) (*PostmanCollection, err
 			return nil, fmt.Errorf("postman: get field confidence for endpoint %d: %w", ep.ID, err)
 		}
 
+		headerRows, err := s.GetEndpointHeaders(ep.ID)
+		if err != nil {
+			return nil, fmt.Errorf("postman: get headers for endpoint %d: %w", ep.ID, err)
+		}
+
+		queryParamRows, err := s.GetQueryParams(ep.ID)
+		if err != nil {
+			return nil, fmt.Errorf("postman: get query params for endpoint %d: %w", ep.ID, err)
+		}
+
 		url, variables := buildPostmanURL(ep.PathPattern)
 
 		var headers []PostmanHeader
 		var body *PostmanBody
+
+		// Add observed request headers (Content-Type added below only if body present).
+		for _, hr := range headerRows {
+			lower := strings.ToLower(hr.HeaderName)
+			if lower == "content-type" {
+				continue // handled with body below
+			}
+			headers = append(headers, PostmanHeader{
+				Key:   hr.HeaderName,
+				Value: headerPlaceholder(hr.HeaderName),
+			})
+		}
 
 		reqSchema := buildSchemaFromConfidence(fieldRows, "request", opts.ConfidenceThreshold)
 		if reqSchema != nil {
@@ -123,12 +152,21 @@ func GeneratePostman(s StoreReader, opts ExportOptions) (*PostmanCollection, err
 			}
 		}
 
+		// Build query params.
+		var queryParams []PostmanQueryParam
+		for _, qp := range queryParamRows {
+			queryParams = append(queryParams, PostmanQueryParam{
+				Key:   qp.ParamName,
+				Value: "",
+			})
+		}
+
 		items = append(items, PostmanItem{
 			Name: fmt.Sprintf("%s %s", strings.ToUpper(ep.Method), ep.PathPattern),
 			Request: PostmanRequest{
 				Method: strings.ToUpper(ep.Method),
 				Header: headers,
-				URL:    PostmanURL{Raw: url, Host: []string{"{{baseUrl}}"}, Path: buildPathSegments(ep.PathPattern), Variable: variables},
+				URL:    PostmanURL{Raw: url, Host: []string{"{{baseUrl}}"}, Path: buildPathSegments(ep.PathPattern), Variable: variables, Query: queryParams},
 				Body:   body,
 			},
 		})
@@ -176,6 +214,29 @@ func buildPathSegments(pathPattern string) []string {
 		return []string{}
 	}
 	return strings.Split(trimmed, "/")
+}
+
+// headerPlaceholder returns a safe placeholder value for a request header name.
+// Sensitive headers (auth, keys, tokens) get {{variable}} placeholders.
+// Well-known headers get their conventional default values.
+func headerPlaceholder(name string) string {
+	lower := strings.ToLower(name)
+	switch lower {
+	case "authorization":
+		return "Bearer {{token}}"
+	case "x-api-key", "x-apikey", "api-key", "x-api-token":
+		return "{{api_key}}"
+	case "x-auth-token", "x-access-token", "x-token":
+		return "{{token}}"
+	case "accept":
+		return "application/json"
+	case "content-type":
+		return "application/json"
+	default:
+		// Convert to snake_case placeholder: "X-Tenant-ID" → "{{x_tenant_id}}"
+		slug := strings.NewReplacer("-", "_", " ", "_").Replace(lower)
+		return "{{" + slug + "}}"
+	}
 }
 
 // schemaToJSONTemplate recursively converts an OpenAPISchema into a Go value

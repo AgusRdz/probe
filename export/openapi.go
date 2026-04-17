@@ -106,6 +106,8 @@ type StoreReader interface {
 	GetEndpoints() ([]store.Endpoint, error)
 	GetFieldConfidence(endpointID int64) ([]store.FieldConfidenceRow, error)
 	GetObservations(endpointID int64, limit int) ([]store.Observation, error)
+	GetEndpointHeaders(endpointID int64) ([]store.HeaderRow, error)
+	GetQueryParams(endpointID int64) ([]store.QueryParamRow, error)
 }
 
 // GenerateOpenAPI queries the store and builds an OpenAPISpec.
