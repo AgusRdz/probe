@@ -198,17 +198,21 @@ func extractASPNetMVCFile(path string, schemas map[string]*observer.Schema, conv
 			continue // skip commented-out attributes
 		}
 		// Check both [Route("...")] and [RoutePrefix("...")] for class-level prefix.
-		raw := ""
-		if m := reCSRoutePrefixAttr.FindStringSubmatch(t); m != nil {
-			raw = m[1]
-		} else if m := reCSRouteAttr.FindStringSubmatch(t); m != nil {
-			raw = m[1]
-		}
-		if raw != "" {
-			raw = strings.Replace(raw, "[controller]",
-				strings.TrimPrefix(controllerBasePath, "/"), 1)
-			classPrefix = "/" + strings.TrimLeft(raw, "/")
-			classPrefixLine = idx
+		// Only record the first match — method-level [Route] attrs before the method
+		// signature must not overwrite the class prefix.
+		if classPrefixLine < 0 {
+			raw := ""
+			if m := reCSRoutePrefixAttr.FindStringSubmatch(t); m != nil {
+				raw = m[1]
+			} else if m := reCSRouteAttr.FindStringSubmatch(t); m != nil {
+				raw = m[1]
+			}
+			if raw != "" {
+				raw = strings.Replace(raw, "[controller]",
+					strings.TrimPrefix(controllerBasePath, "/"), 1)
+				classPrefix = "/" + strings.TrimLeft(raw, "/")
+				classPrefixLine = idx
+			}
 		}
 		if reCSAuthorize.MatchString(t) {
 			classRequiresAuth = true
