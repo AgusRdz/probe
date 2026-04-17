@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"bufio"
 	"flag"
 	"fmt"
 	"os"
@@ -37,11 +38,12 @@ func RunExport(args []string, cfg *config.Config) {
 	}
 
 	// General flags.
-	format   := fs.String("format", cfg.Export.DefaultFormat, "output format: openapi (YAML), json (OpenAPI JSON), swagger (2.0), postman, curl, httpie, bruno")
-	out      := fs.String("out", "", "output file or directory path (overrides config and smart default)")
-	minCalls := fs.Int("min-calls", cfg.Export.MinCalls, "only export endpoints with at least N traffic calls (0 = include scan-only too)")
-	db       := fs.String("db", "", "override DB path")
-	title    := fs.String("title", "", "collection/spec title (overrides config info_title)")
+	format        := fs.String("format", cfg.Export.DefaultFormat, "output format: openapi (YAML), json (OpenAPI JSON), swagger (2.0), postman, curl, httpie, bruno")
+	out           := fs.String("out", "", "output file or directory path (overrides config and smart default)")
+	minCalls      := fs.Int("min-calls", cfg.Export.MinCalls, "only export endpoints with at least N traffic calls (0 = include scan-only too)")
+	db            := fs.String("db", "", "override DB path")
+	title         := fs.String("title", "", "collection/spec title (overrides config info_title)")
+	noInteractive := fs.Bool("no-interactive", false, "disable interactive conflict resolution (conflicts default to keep)")
 
 	// Shorthand flags — each selects a format and enables smart default output naming.
 	fOpenAPI  := fs.Bool("openapi",  false, "shorthand for --format openapi  (default output: <dir>.yaml)")
@@ -199,6 +201,15 @@ func RunExport(args []string, cfg *config.Config) {
 			fmt.Fprintf(os.Stderr, "probe: generate postman: %v\n", err)
 			os.Exit(1)
 		}
+
+		// Auto-merge: if the output file already exists, merge instead of overwrite.
+		if resolvedOut != "" {
+			if _, statErr := os.Stat(resolvedOut); statErr == nil {
+				runPostmanMerge(col, resolvedOut, *noInteractive)
+				break
+			}
+		}
+
 		if err := writeToFileOrStdout(resolvedOut, func(w *os.File) error {
 			return export.WritePostman(w, col)
 		}); err != nil {
@@ -234,6 +245,93 @@ func RunExport(args []string, cfg *config.Config) {
 		fmt.Fprintln(os.Stderr)
 		fmt.Fprintln(os.Stderr)
 	}
+}
+
+// runPostmanMerge loads the existing collection at path, diffs it against the
+// freshly generated col, resolves conflicts interactively (or defaults to keep
+// when noInteractive is true), and writes the merged result back to path.
+func runPostmanMerge(col *export.PostmanCollection, path string, noInteractive bool) {
+	existing, err := export.LoadExistingCollection(path)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "probe: read existing collection: %v\n", err)
+		os.Exit(1)
+	}
+
+	result, err := export.ComputeMerge(existing, col)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "probe: compute merge: %v\n", err)
+		os.Exit(1)
+	}
+
+	fmt.Fprintf(os.Stderr, "\nprobe: reading %s (%d items)\n", path, len(existing.Items))
+	fmt.Fprintf(os.Stderr, "probe: %d new endpoint(s), %d conflict(s)\n\n",
+		len(result.Added), len(result.Conflicts))
+
+	for _, a := range result.Added {
+		fmt.Fprintf(os.Stderr, "  added    %s\n", a.Name)
+	}
+	for _, u := range result.Unchanged {
+		fmt.Fprintf(os.Stderr, "  skipped  %s (already exists, no changes)\n", u)
+	}
+
+	resolutions := make(map[string]string, len(result.Conflicts))
+
+	if len(result.Conflicts) > 0 && !noInteractive {
+		fmt.Fprintln(os.Stderr)
+		scanner := bufio.NewScanner(os.Stdin)
+		skipAll := false
+		for _, c := range result.Conflicts {
+			if skipAll {
+				resolutions[c.Key] = "keep"
+				continue
+			}
+			existBody := ""
+			if c.Existing.Request.Body != nil {
+				existBody = c.Existing.Request.Body.Raw
+			}
+			incomingBody := ""
+			if c.Incoming.Request.Body != nil {
+				incomingBody = c.Incoming.Request.Body.Raw
+			}
+			fmt.Fprintf(os.Stderr, "conflict: %s\n", c.Key)
+			fmt.Fprintf(os.Stderr, "  current body:  %s\n", existBody)
+			fmt.Fprintf(os.Stderr, "  probe body:    %s\n\n", incomingBody)
+			fmt.Fprintf(os.Stderr, "  [k]eep current  [r]eplace  [m]erge (add missing fields)  [s]kip all conflicts: ")
+
+			resolution := "keep"
+			if scanner.Scan() {
+				switch strings.TrimSpace(strings.ToLower(scanner.Text())) {
+				case "r":
+					resolution = "replace"
+				case "m":
+					resolution = "merge"
+				case "s":
+					resolution = "keep"
+					skipAll = true
+				}
+			}
+			resolutions[c.Key] = resolution
+			fmt.Fprintln(os.Stderr)
+		}
+	}
+
+	merged, err := export.BuildMergedCollection(existing, col, result, resolutions)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "probe: build merged collection: %v\n", err)
+		os.Exit(1)
+	}
+
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		fmt.Fprintf(os.Stderr, "probe: create directories: %v\n", err)
+		os.Exit(1)
+	}
+	if err := os.WriteFile(path, merged, 0o644); err != nil {
+		fmt.Fprintf(os.Stderr, "probe: write merged collection: %v\n", err)
+		os.Exit(1)
+	}
+
+	totalItems := len(existing.Items) + len(result.Added)
+	fmt.Fprintf(os.Stderr, "\nprobe: wrote %d items → %s\n\n", totalItems, path)
 }
 
 func printExportSummary(label, out string) {
