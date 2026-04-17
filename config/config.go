@@ -33,13 +33,14 @@ type InferenceConfig struct {
 
 // ExportConfig controls generated-output defaults.
 type ExportConfig struct {
-	DefaultFormat   string  `yaml:"default_format"`
-	MinConfidence   float64 `yaml:"min_confidence"`
-	IncludeSkeleton bool    `yaml:"include_skeleton"` // kept for YAML compat; use MinCalls instead
-	MinCalls        int     `yaml:"min_calls"`        // 0 = include all; 1 = observed only
-	OpenAPIVersion  string  `yaml:"openapi_version"`
-	InfoTitle       string  `yaml:"info_title"`
-	InfoVersion     string  `yaml:"info_version"`
+	DefaultFormat   string            `yaml:"default_format"`
+	MinConfidence   float64           `yaml:"min_confidence"`
+	IncludeSkeleton bool              `yaml:"include_skeleton"` // kept for YAML compat; use MinCalls instead
+	MinCalls        int               `yaml:"min_calls"`        // 0 = include all; 1 = observed only
+	OpenAPIVersion  string            `yaml:"openapi_version"`
+	InfoTitle       string            `yaml:"info_title"`
+	InfoVersion     string            `yaml:"info_version"`
+	Outputs         map[string]string `yaml:"outputs"` // per-format default output paths
 }
 
 // OutputConfig controls CLI presentation.
@@ -106,6 +107,7 @@ func Default() *Config {
 			OpenAPIVersion:  "3.0.3",
 			InfoTitle:       "Discovered API",
 			InfoVersion:     "0.0.1",
+			Outputs:         map[string]string{},
 		},
 		Output: OutputConfig{
 			NoColor:    false,
@@ -253,6 +255,12 @@ func merge(base, override *Config) {
 	}
 	if override.Export.MinCalls != 0 {
 		base.Export.MinCalls = override.Export.MinCalls
+	}
+	for k, v := range override.Export.Outputs {
+		if base.Export.Outputs == nil {
+			base.Export.Outputs = make(map[string]string)
+		}
+		base.Export.Outputs[k] = v
 	}
 
 	// Output

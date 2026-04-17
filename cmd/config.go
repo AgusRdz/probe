@@ -84,10 +84,17 @@ const configTemplate = `# probe configuration
 
 # export:
 #   default_format: openapi
-#   min_confidence: 0.0
-#   include_skeleton: false
+#   min_calls: 0            # 0 = include scan-only; 1 = observed traffic only
 #   info_title: "My API"
 #   info_version: "1.0.0"
+#   outputs:                # default output paths per format (used by --postman, --curl, etc.)
+#     openapi: api.yaml
+#     json:    api.json
+#     swagger: swagger.yaml
+#     postman: collection.json
+#     curl:    api.sh
+#     httpie:  api-httpie.sh
+#     bruno:   ./my-api-bruno
 
 # list:
 #   columns: method,path,source,file,calls,coverage
