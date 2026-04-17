@@ -1,11 +1,13 @@
 package cmd
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
 
 	"github.com/AgusRdz/probe/config"
 )
@@ -63,11 +65,16 @@ func configShow(cfg *config.Config) {
 	fmt.Println("  probe config edit global   # global (~/.config/probe/config.yml)")
 }
 
-// configTemplate is written to a new config file so the user has a reference.
-const configTemplate = `# probe configuration
-# Full reference: https://github.com/AgusRdz/probe
+// configSection is a top-level config block with its YAML key and commented template.
+type configSection struct {
+	key      string // top-level YAML key, e.g. "proxy"
+	template string // commented-out template block
+}
 
-# proxy:
+// configSections defines every supported top-level section in order.
+// A section is appended to an existing config only when its key is absent.
+var configSections = []configSection{
+	{"proxy", `# proxy:
 #   port: 4000
 #   target: http://localhost:3001
 #   bind: 127.0.0.1
@@ -76,13 +83,13 @@ const configTemplate = `# probe configuration
 #     - /health
 #     - /metrics
 #   body_size_limit: 1048576   # 1MB
-
-# inference:
+`},
+	{"inference", `# inference:
 #   path_normalization_threshold: 3    # calls before a segment becomes {id}
 #   confidence_threshold: 0.9          # required vs optional field cutoff
 #   max_xml_depth: 20
-
-# export:
+`},
+	{"export", `# export:
 #   default_format: openapi
 #   min_calls: 0            # 0 = include scan-only; 1 = observed traffic only
 #   info_title: "My API"
@@ -96,20 +103,33 @@ const configTemplate = `# probe configuration
 #     curl:    api.sh
 #     httpie:  api-httpie.sh
 #     bruno:   ./my-api-bruno
-
-# list:
+`},
+	{"list", `# list:
 #   columns: method,path,source,file,calls,coverage
 #   # available: method path source file calls coverage protocol status framework
-
-# output:
+`},
+	{"output", `# output:
 #   no_color: false
 #   editor: code       # editor for 'probe config edit' (e.g. code, vim, nano, notepad++)
 #                      # also settable via $PROBE_EDITOR env var
-
-# path_overrides:
+`},
+	{"path_overrides", `# path_overrides:
 #   - pattern: "/api/v*/users/me"
 #     keep_as: "/api/v{version}/users/me"
-`
+`},
+}
+
+// configTemplate is the full file written when creating a new config from scratch.
+var configTemplate = func() string {
+	var b strings.Builder
+	b.WriteString("# probe configuration\n")
+	b.WriteString("# Full reference: https://github.com/AgusRdz/probe\n")
+	for _, s := range configSections {
+		b.WriteByte('\n')
+		b.WriteString(s.template)
+	}
+	return b.String()
+}()
 
 func configEdit(target string, cfg *config.Config) {
 	var path string
@@ -123,7 +143,7 @@ func configEdit(target string, cfg *config.Config) {
 		os.Exit(1)
 	}
 
-	// Create file with template if it doesn't exist yet.
+	// Create file with full template if it doesn't exist yet.
 	if _, err := os.Stat(path); os.IsNotExist(err) {
 		if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
 			fmt.Fprintf(os.Stderr, "probe config: create dir: %v\n", err)
@@ -134,6 +154,11 @@ func configEdit(target string, cfg *config.Config) {
 			os.Exit(1)
 		}
 		fmt.Printf("Created %s\n", path)
+	} else {
+		// File exists — append any sections that are entirely absent.
+		if added := appendMissingSections(path); added > 0 {
+			fmt.Printf("Added %d new setting(s) to %s\n", added, path)
+		}
 	}
 
 	editor := resolveEditor(cfg)
@@ -144,13 +169,45 @@ func configEdit(target string, cfg *config.Config) {
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
-		// Some editors (code, subl) fork and return immediately — that's fine.
-		// Only surface the error if the file was never opened at all.
 		if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() != 0 {
 			fmt.Fprintf(os.Stderr, "probe config: editor exited with error: %v\n", err)
 			os.Exit(1)
 		}
 	}
+}
+
+// appendMissingSections reads the existing config file and appends any top-level
+// sections whose key does not appear anywhere in the file (even as a comment).
+// Returns the number of sections appended.
+func appendMissingSections(path string) int {
+	existing, err := os.ReadFile(path)
+	if err != nil {
+		return 0
+	}
+
+	var missing []configSection
+	for _, s := range configSections {
+		// A section is considered present if its key appears anywhere in the file
+		// (e.g. "proxy:", "# proxy:", "  proxy:").
+		if !bytes.Contains(existing, []byte(s.key+":")) {
+			missing = append(missing, s)
+		}
+	}
+	if len(missing) == 0 {
+		return 0
+	}
+
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0600)
+	if err != nil {
+		return 0
+	}
+	defer f.Close() //nolint:errcheck
+
+	fmt.Fprintf(f, "\n# --- added by probe (new settings) ---\n")
+	for _, s := range missing {
+		fmt.Fprintf(f, "\n%s", s.template)
+	}
+	return len(missing)
 }
 
 // resolveEditor returns the editor to use:
