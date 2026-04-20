@@ -175,15 +175,19 @@ func openEditor(currentDesc string, currentTags []string) (editorResult, error) 
 	}
 	f.Close()
 
-	editor := os.Getenv("EDITOR")
-	if editor == "" {
-		editor = os.Getenv("VISUAL")
+	editorEnv := os.Getenv("EDITOR")
+	if editorEnv == "" {
+		editorEnv = os.Getenv("VISUAL")
 	}
-	if editor == "" {
-		editor = "vi"
+	if editorEnv == "" {
+		editorEnv = "vi"
 	}
+	// $EDITOR may contain flags (e.g. "code --wait"). Split so that extra args
+	// are passed correctly rather than treated as part of the binary name.
+	editorParts := strings.Fields(editorEnv)
+	editorArgs := append(editorParts[1:], f.Name())
 
-	cmd := exec.Command(editor, f.Name())
+	cmd := exec.Command(editorParts[0], editorArgs...)
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr

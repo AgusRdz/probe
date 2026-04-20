@@ -210,7 +210,7 @@ try {
     Write-Error "probe background update failed: $_"
 }
 Remove-Item -Path $PSCommandPath -Force -ErrorAction SilentlyContinue
-`, pid, tmp, exe, old)
+`, pid, psEscape(tmp), psEscape(exe), psEscape(old))
 
 	scriptPath := filepath.Join(os.TempDir(), "probe-update.ps1")
 	if err := os.WriteFile(scriptPath, []byte(script), 0700); err != nil { //nolint:gosec
@@ -288,4 +288,10 @@ func parseSegment(s string) int {
 		n = n*10 + int(c-'0')
 	}
 	return n
+}
+
+// psEscape escapes a file path for use inside a PowerShell single-quoted string.
+// In PS single-quoted strings the only escape sequence is '' for a literal '.
+func psEscape(path string) string {
+	return strings.ReplaceAll(path, "'", "''")
 }
