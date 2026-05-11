@@ -18,13 +18,14 @@ var slugRe = regexp.MustCompile(`[^a-z0-9]+`)
 
 // formatExtensions maps format names to their default file extension.
 var formatExtensions = map[string]string{
-	"openapi": ".yaml",
-	"json":    ".json",
-	"swagger": ".swagger.yaml",
-	"postman": ".postman_collection.json",
-	"curl":    ".sh",
-	"httpie":  ".httpie.sh",
-	"bruno":   "-bruno", // directory suffix
+	"openapi":       ".yaml",
+	"json":          ".json",
+	"swagger":       ".swagger.yaml",
+	"postman":       ".postman_collection.json",
+	"httpie-desktop": ".postman_collection.json",
+	"curl":          ".sh",
+	"httpie":        ".httpie.sh",
+	"bruno":         "-bruno", // directory suffix
 }
 
 // RunExport runs `probe export [flags]`.
@@ -38,7 +39,7 @@ func RunExport(args []string, cfg *config.Config) {
 	}
 
 	// General flags.
-	format        := fs.String("format", cfg.Export.DefaultFormat, "output format: openapi (YAML), json (OpenAPI JSON), swagger (2.0), postman, curl, httpie, bruno")
+	format        := fs.String("format", cfg.Export.DefaultFormat, "output format: openapi (YAML), json (OpenAPI 3.0 JSON — for Swagger UI/Redoc/Insomnia, not HTTPie Desktop), swagger (2.0), postman, httpie-desktop (Postman collection for HTTPie Desktop), curl, httpie (CLI shell script), bruno")
 	out           := fs.String("out", "", "output file or directory path (overrides config and smart default)")
 	minCalls      := fs.Int("min-calls", cfg.Export.MinCalls, "only export endpoints with at least N traffic calls (0 = include scan-only too)")
 	db            := fs.String("db", "", "override DB path")
@@ -46,13 +47,14 @@ func RunExport(args []string, cfg *config.Config) {
 	noInteractive := fs.Bool("no-interactive", false, "disable interactive conflict resolution (conflicts default to keep)")
 
 	// Shorthand flags — each selects a format and enables smart default output naming.
-	fOpenAPI  := fs.Bool("openapi",  false, "shorthand for --format openapi  (default output: <dir>.yaml)")
-	fJSON     := fs.Bool("json",     false, "shorthand for --format json     (default output: <dir>.json)")
-	fSwagger  := fs.Bool("swagger",  false, "shorthand for --format swagger  (default output: <dir>.swagger.yaml)")
-	fPostman  := fs.Bool("postman",  false, "shorthand for --format postman  (default output: <dir>.postman_collection.json)")
-	fCurl     := fs.Bool("curl",     false, "shorthand for --format curl     (default output: <dir>.sh)")
-	fHTTPie   := fs.Bool("httpie",   false, "shorthand for --format httpie   (default output: <dir>.httpie.sh)")
-	fBruno    := fs.Bool("bruno",    false, "shorthand for --format bruno    (default output: <dir>-bruno/)")
+	fOpenAPI      := fs.Bool("openapi",       false, "shorthand for --format openapi       (default output: <dir>.yaml)")
+	fJSON         := fs.Bool("json",          false, "shorthand for --format json           (OpenAPI 3.0 JSON — for Swagger UI, Redoc, Insomnia; NOT importable by HTTPie Desktop)")
+	fSwagger      := fs.Bool("swagger",       false, "shorthand for --format swagger        (default output: <dir>.swagger.yaml)")
+	fPostman      := fs.Bool("postman",       false, "shorthand for --format postman        (default output: <dir>.postman_collection.json)")
+	fHTTPieDesktop := fs.Bool("httpie-desktop", false, "Postman collection for HTTPie Desktop (default output: <dir>.postman_collection.json)")
+	fCurl         := fs.Bool("curl",          false, "shorthand for --format curl           (default output: <dir>.sh)")
+	fHTTPie       := fs.Bool("httpie",        false, "shorthand for --format httpie         (HTTPie CLI shell script — not for HTTPie Desktop; use --httpie-desktop instead)")
+	fBruno        := fs.Bool("bruno",         false, "shorthand for --format bruno          (default output: <dir>-bruno/)")
 
 	if err := fs.Parse(args); err != nil {
 		os.Exit(1)
@@ -70,6 +72,7 @@ func RunExport(args []string, cfg *config.Config) {
 		name string
 	}{
 		{*fPostman, "postman"},
+		{*fHTTPieDesktop, "httpie-desktop"},
 		{*fOpenAPI, "openapi"},
 		{*fJSON, "json"},
 		{*fSwagger, "swagger"},
@@ -109,6 +112,11 @@ func RunExport(args []string, cfg *config.Config) {
 			}
 			resolvedOut = base + formatExtensions[resolvedFormat]
 		}
+	}
+
+	// httpie-desktop is an alias for postman — same format, different UX label.
+	if resolvedFormat == "httpie-desktop" {
+		resolvedFormat = "postman"
 	}
 
 	s, err := store.Open(*db)

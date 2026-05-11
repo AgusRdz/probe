@@ -123,7 +123,7 @@ func GeneratePostman(s StoreReader, opts ExportOptions) (*PostmanCollection, err
 
 		url, variables := buildPostmanURL(ep.PathPattern)
 
-		var headers []PostmanHeader
+		headers := []PostmanHeader{}
 		var body *PostmanBody
 
 		// Add observed request headers (Content-Type added below only if body present).
