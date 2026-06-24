@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+
+	"github.com/AgusRdz/probe/config"
 )
 
 // GenerateHTTPie returns a shell script with one http (HTTPie) command per endpoint.
@@ -13,7 +15,7 @@ func GenerateHTTPie(s StoreReader, opts ExportOptions) ([]byte, error) {
 		opts.ConfidenceThreshold = 0.9
 	}
 	if opts.InfoTitle == "" {
-		opts.InfoTitle = "Discovered API"
+		opts.InfoTitle = config.DefaultInfoTitle()
 	}
 
 	endpoints, err := s.GetEndpoints()

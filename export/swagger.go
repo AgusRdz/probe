@@ -5,6 +5,7 @@ import (
 	"io"
 	"strings"
 
+	"github.com/AgusRdz/probe/config"
 	"github.com/AgusRdz/probe/store"
 	"gopkg.in/yaml.v3"
 )
@@ -72,7 +73,7 @@ func GenerateSwagger(s StoreReader, opts ExportOptions) (*SwaggerSpec, error) {
 		opts.ConfidenceThreshold = 0.9
 	}
 	if opts.InfoTitle == "" {
-		opts.InfoTitle = "Discovered API"
+		opts.InfoTitle = config.DefaultInfoTitle()
 	}
 	if opts.InfoVersion == "" {
 		opts.InfoVersion = "0.0.1"

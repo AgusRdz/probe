@@ -73,6 +73,16 @@ type Config struct {
 	PathOverrides []PathOverride  `yaml:"path_overrides"`
 }
 
+// DefaultInfoTitle returns the working directory name, or "Discovered API" as fallback.
+func DefaultInfoTitle() string {
+	if wd, err := os.Getwd(); err == nil {
+		if name := filepath.Base(wd); name != "" && name != "." {
+			return name
+		}
+	}
+	return "Discovered API"
+}
+
 // Default returns a *Config populated with all built-in defaults.
 func Default() *Config {
 	return &Config{
@@ -106,7 +116,7 @@ func Default() *Config {
 			IncludeSkeleton: true,
 			MinCalls:        0,
 			OpenAPIVersion:  "3.0.3",
-			InfoTitle:       "Discovered API",
+			InfoTitle:       DefaultInfoTitle(),
 			InfoVersion:     "0.0.1",
 			Outputs:         map[string]string{},
 		},

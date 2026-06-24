@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"io"
 	"strings"
+
+	"github.com/AgusRdz/probe/config"
 )
 
 // PostmanCollection represents a Postman Collection v2.1 JSON document.
@@ -88,7 +90,7 @@ func GeneratePostman(s StoreReader, opts ExportOptions) (*PostmanCollection, err
 		opts.ConfidenceThreshold = 0.9
 	}
 	if opts.InfoTitle == "" {
-		opts.InfoTitle = "Discovered API"
+		opts.InfoTitle = config.DefaultInfoTitle()
 	}
 
 	endpoints, err := s.GetEndpoints()

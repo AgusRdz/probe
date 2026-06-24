@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+
+	"github.com/AgusRdz/probe/config"
 )
 
 // BrunoCollection is a map of relative file paths to their contents.
@@ -21,7 +23,7 @@ func GenerateBruno(s StoreReader, opts ExportOptions) (BrunoCollection, error) {
 		opts.ConfidenceThreshold = 0.9
 	}
 	if opts.InfoTitle == "" {
-		opts.InfoTitle = "Discovered API"
+		opts.InfoTitle = config.DefaultInfoTitle()
 	}
 
 	endpoints, err := s.GetEndpoints()
